@@ -5,7 +5,11 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from workflows import ResearchWorkflow
-    from activities import fetch_market_events, analyze_events
+    from activities import (
+    fetch_market_events,
+    analyze_events,
+    plan_research,
+)
 
 async def main():
     client = await Client.connect("localhost:7233")
@@ -13,7 +17,7 @@ async def main():
         client,
         task_queue="my-task-queue",
         workflows=[ResearchWorkflow],
-        activities=[fetch_market_events, analyze_events],
+        activities=[fetch_market_events, analyze_events, plan_research],
     )
     print("Worker started.")
     await worker.run()
