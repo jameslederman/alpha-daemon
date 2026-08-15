@@ -29,7 +29,7 @@ class ResearchWorkflow:
 
         recommendation = await workflow.execute_activity(
             "analyze_events",
-            events,
+            args=[events, questions],
             start_to_close_timeout=timedelta(seconds=60),
         )
 

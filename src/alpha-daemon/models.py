@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 from pydantic import BaseModel
+from datetime import datetime, date
 
 
 class MarketEvent(BaseModel):
@@ -24,7 +25,7 @@ class ResearchQuestion:
 
 @dataclass
 class Evidence:
-    source_type: str
+    source: str
     source_id: str
     claim: str
     relevance: str
@@ -37,3 +38,17 @@ class Hypothesis:
     supporting_evidence: list[Evidence]
     contradicting_evidence: list[Evidence]
     confidence: float
+
+
+@dataclass(frozen=True)
+class ResearchRequest:
+    symbol: str
+    as_of: datetime
+
+class Filing(BaseModel):
+    symbol: str
+    cik: str
+    accession_number: str
+    form: str # 10K, 10-Q, 8K etc
+    filed_at: date
+    primary_document: str

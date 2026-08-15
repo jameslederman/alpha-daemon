@@ -12,7 +12,7 @@ async def main():
     # Execute the workflow
     result = await client.execute_workflow(
         ResearchWorkflow.run,
-        "SPY",
+        "AAPL",
         id="research-symbol-workflow",
         task_queue="my-task-queue",
     )

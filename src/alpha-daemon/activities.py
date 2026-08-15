@@ -1,36 +1,52 @@
 import json
 import os
-
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
+from edgar import (get_latest_filing_event, NoRelevantFilingsError)
 from llm import BedrockLLMClient
 from models import MarketEvent, ResearchQuestion, Hypothesis, Evidence, Recommendation
 
 
 @activity.defn
-async def fetch_market_events(symbol: str) -> list[MarketEvent]:
-    # Mock data - replace with actual API calls
-    return [
-        MarketEvent(
-            symbol=symbol,
-            headline=f"{symbol} earnings beat expectations",
-            body=f"Company X reported Q2 earnings that exceeded analyst estimates...",
-        ),
-        MarketEvent(
-            symbol=symbol,
-            headline=f"Analyst upgrades {symbol}",
-            body=f"Goldman Sachs upgraded {symbol} to 'Buy'...",
-        ),
-    ]
+async def fetch_market_events(
+    symbol: str,
+) -> list[MarketEvent]:
+    user_agent = os.environ["SEC_USER_AGENT"]
 
+    try:
+        filing_event = await get_latest_filing_event(
+            symbol,
+            user_agent=user_agent,
+        )
+    except NoRelevantFilingsError as exc:
+        raise ApplicationError(
+            str(exc),
+            type="NoRelevantSECFilings",
+            non_retryable=True,
+        ) from exc
+
+    return [filing_event]
 
 @activity.defn
-async def analyze_events(events: list[MarketEvent]) -> Recommendation:
+async def analyze_events(
+    events: list[MarketEvent],
+    questions: list[ResearchQuestion],
+) -> Recommendation:
     symbol = events[0].symbol
     action = "BUY"
     confidence = 0.9
-    rationale = f"Based on {len(events)} positive news events, recommending BUY."
-    return Recommendation(symbol=symbol, action=action, confidence=confidence, rationale=rationale)
+    rationale = (
+        f"Placeholder analysis using {len(events)} event(s) "
+        f"and {len(questions)} research question(s)."
+    )
+
+    return Recommendation(
+        symbol=symbol,
+        action=action,
+        confidence=confidence,
+        rationale=rationale,
+    )
 
 
 @activity.defn
