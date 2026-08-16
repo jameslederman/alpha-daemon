@@ -1,9 +1,60 @@
+from functools import cache
+import boto3
 from dataclasses import dataclass
+import json
+import numpy as np
 import re
+from sentence_transformers import CrossEncoder
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from models import EvidenceChunk, MarketEvent
+
+
+BARE_ITEM_PATTERN = re.compile(
+    r"^ITEM\s+\d+[A-Z]?\.?$",
+    re.IGNORECASE,
+)
+
+SEC_SECTION_PATTERN = re.compile(
+    r"^(?:"
+    r"PART\s+[IVX]+"
+    r"|"
+    r"ITEM\s+\d+[A-Z]?(?:\.\d+)?\.?(?:\s+.*)?"
+    r")$",
+    re.IGNORECASE,
+)
+
+RERANKER_MODEL_ID = "cross-encoder/ms-marco-MiniLM-L6-v2"
+
+
+@dataclass(frozen=True)
+class RankedChunk:
+    index: int
+    text: str
+    score: float
+
+
+@dataclass(frozen=True)
+class HybridRankedChunk:
+    index: int
+    text: str
+    score: float
+    tfidf_rank: int | None
+    semantic_rank: int | None
+
+
+@dataclass(frozen=True)
+class DocumentSection:
+    heading: str
+    text: str
+
+
+@dataclass(frozen=True)
+class RerankedChunk:
+    index: int
+    text: str
+    score: float
 
 
 def chunk_text(
@@ -78,8 +129,8 @@ def chunk_sec_event(
             chunk_id = (
                 f"{event.source}:"
                 f"{event.source_id}:"
-                f"section-{section_index}:"
-                f"chunk-{chunk_index}"
+                f"section:{section_index}:"
+                f"chunk:{chunk_index}"
             )
 
             evidence_chunks.append(
@@ -100,13 +151,6 @@ def chunk_sec_event(
             )
 
     return evidence_chunks
-
-
-@dataclass(frozen=True)
-class RankedChunk:
-    index: int
-    text: str
-    score: float
 
 
 def retrieve_chunks(
@@ -183,15 +227,6 @@ def retrieve_for_queries(
         key=lambda result: result.index,
     )
 
-SEC_SECTION_PATTERN = re.compile(
-    r"^(?:"
-    r"PART\s+[IVX]+"
-    r"|"
-    r"ITEM\s+\d+[A-Z]?(?:\.\d+)?\.?(?:\s+.*)?"
-    r")$",
-    re.IGNORECASE,
-)
-
 
 def find_sec_section_headings(
     text: str,
@@ -213,18 +248,6 @@ def find_sec_section_headings(
             )
 
     return headings
-
-
-@dataclass(frozen=True)
-class DocumentSection:
-    heading: str
-    text: str
-
-
-BARE_ITEM_PATTERN = re.compile(
-    r"^ITEM\s+\d+[A-Z]?\.?$",
-    re.IGNORECASE,
-)
 
 
 def split_sec_sections(
@@ -264,3 +287,193 @@ def split_sec_sections(
             )
 
     return sections
+
+@cache
+def get_bedrock_runtime():
+    return boto3.client(
+        "bedrock-runtime",
+        region_name="us-east-1",
+    )
+
+def embed_text(
+    text: str,
+    model_id: str = "amazon.titan-embed-text-v2:0",
+) -> list[float]:
+    client = get_bedrock_runtime()
+
+    response = client.invoke_model(
+        modelId=model_id,
+        body=json.dumps(
+            {
+                "inputText": text,
+                "dimensions": 512,
+                "normalize": True,
+            }
+        ),
+    )
+
+    body = json.loads(response["body"].read())
+
+    return body["embedding"]
+
+
+def embed_chunks(
+    chunks: list[str],
+) -> np.ndarray:
+    return np.array(
+        [
+            embed_text(chunk)
+            for chunk in chunks
+        ],
+        dtype=np.float32,
+    )
+
+
+def retrieve_chunks_semantic(
+    query: str,
+    chunks: list[str],
+    chunk_embeddings: np.ndarray,
+    top_k: int = 3,
+) -> list[RankedChunk]:
+    if not query.strip():
+        raise ValueError("query must not be empty")
+
+    if not chunks:
+        return []
+
+    if top_k <= 0:
+        raise ValueError("top_k must be positive")
+
+    if len(chunks) != len(chunk_embeddings):
+        raise ValueError(
+            "chunks and chunk_embeddings must have "
+            "the same length"
+        )
+
+    query_embedding = np.array(
+        embed_text(query),
+        dtype=np.float32,
+    )
+
+    scores = chunk_embeddings @ query_embedding
+
+    ranked_indices = scores.argsort()[::-1][:top_k]
+
+    return [
+        RankedChunk(
+            index=int(index),
+            text=chunks[index],
+            score=float(scores[index]),
+        )
+        for index in ranked_indices
+    ]
+
+
+def retrieve_chunks_hybrid(
+    query: str,
+    chunks: list[str],
+    chunk_embeddings: np.ndarray,
+    top_k_per_method: int = 5,
+    top_k: int = 5,
+    rrf_k: int = 60,
+) -> list[HybridRankedChunk]:
+    tfidf_results = retrieve_chunks(
+        query=query,
+        chunks=chunks,
+        top_k=top_k_per_method,
+    )
+
+    semantic_results = retrieve_chunks_semantic(
+        query=query,
+        chunks=chunks,
+        chunk_embeddings=chunk_embeddings,
+        top_k=top_k_per_method,
+    )
+
+    tfidf_ranks = {
+        result.index: rank
+        for rank, result in enumerate(
+            tfidf_results,
+            start=1,
+        )
+    }
+
+    semantic_ranks = {
+        result.index: rank
+        for rank, result in enumerate(
+            semantic_results,
+            start=1,
+        )
+    }
+
+    candidate_indices = (
+        set(tfidf_ranks)
+        | set(semantic_ranks)
+    )
+
+    results: list[HybridRankedChunk] = []
+
+    for index in candidate_indices:
+        tfidf_rank = tfidf_ranks.get(index)
+        semantic_rank = semantic_ranks.get(index)
+
+        score = 0.0
+
+        if tfidf_rank is not None:
+            score += 1 / (rrf_k + tfidf_rank)
+
+        if semantic_rank is not None:
+            score += 1 / (rrf_k + semantic_rank)
+
+        results.append(
+            HybridRankedChunk(
+                index=index,
+                text=chunks[index],
+                score=score,
+                tfidf_rank=tfidf_rank,
+                semantic_rank=semantic_rank,
+            )
+        )
+
+    return sorted(
+        results,
+        key=lambda result: result.score,
+        reverse=True,
+    )[:top_k]
+
+@cache
+def load_reranker() -> CrossEncoder:
+    return CrossEncoder(RERANKER_MODEL_ID)
+
+def rerank_chunks(
+    query: str,
+    candidates: list[HybridRankedChunk],
+    reranker: CrossEncoder,
+    top_k: int = 3,
+) -> list[RerankedChunk]:
+    if not candidates:
+        return []
+
+    documents = [
+        candidate.text
+        for candidate in candidates
+    ]
+
+    rankings = reranker.rank(
+        query,
+        documents,
+        top_k=top_k,
+    )
+
+    return [
+        RerankedChunk(
+            index=candidates[
+                int(result["corpus_id"])
+            ].index,
+            text=candidates[
+                int(result["corpus_id"])
+            ].text,
+            score=float(result["score"]),
+        )
+        for result in rankings
+    ]

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -18,6 +19,9 @@ async def main():
         "localhost:7233",
         data_converter=pydantic_data_converter,
     )
+
+    logging.basicConfig(level=logging.INFO)
+    
     worker = Worker(
         client,
         task_queue="my-task-queue",

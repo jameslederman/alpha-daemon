@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime, date
 
 
@@ -32,11 +32,17 @@ class Recommendation(BaseModel):
     confidence: float
     rationale: str
 
-@dataclass
-class ResearchQuestion:
+
+class ResearchQuestion(BaseModel):
+    # question_id: str
+    question_key: str | None = None
+
     question: str
     rationale: str
     priority: int
+
+    # as_of: datetime
+    # created_at: datetime
 
 
 @dataclass
@@ -61,6 +67,7 @@ class ResearchRequest:
     symbol: str
     as_of: datetime
 
+
 class Filing(BaseModel):
     symbol: str
     cik: str
@@ -68,3 +75,15 @@ class Filing(BaseModel):
     form: str # 10K, 10-Q, 8K etc
     filed_at: date
     primary_document: str
+
+
+class ResearchScope(BaseModel):
+    kind: str
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class ResearchRun(BaseModel):
+    run_id: str
+    scope: ResearchScope
+    as_of: datetime
+    created_at: datetime

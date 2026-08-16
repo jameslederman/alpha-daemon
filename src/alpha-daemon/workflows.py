@@ -27,7 +27,7 @@ class ResearchWorkflow:
         evidence_chunks = await workflow.execute_activity(
             "retrieve_evidence",
             args=[events, questions],
-            start_to_close_timeout=timedelta(seconds=30),
+            start_to_close_timeout=timedelta(minutes=10),
         )
 
         workflow.logger.info(f"Research questions: {questions}")

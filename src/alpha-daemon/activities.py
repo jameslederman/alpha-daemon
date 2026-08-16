@@ -15,7 +15,13 @@ from models import (
 )
 from retrieval import (
     chunk_sec_event,
+    embed_chunks,
+    retrieve_chunks,
     retrieve_for_queries,
+    retrieve_chunks_semantic,
+    retrieve_chunks_hybrid,
+    load_reranker,
+    rerank_chunks,
 )
 
 
@@ -249,6 +255,116 @@ async def retrieve_evidence(
         for event in events
         for chunk in chunk_sec_event(event)
     ]
+
+    chunk_texts = [
+        chunk.text
+        for chunk in all_chunks
+    ]
+
+    chunk_embeddings = embed_chunks(chunk_texts)
+
+    reranker = load_reranker()
+
+    for question in questions:
+        query = (
+            f"{question.question}\n"
+            f"{question.rationale}"
+        )
+
+        tfidf_results = retrieve_chunks(
+            query=query,
+            chunks=chunk_texts,
+            top_k=3,
+        )
+
+        semantic_results = retrieve_chunks_semantic(
+            query=query,
+            chunks=chunk_texts,
+            chunk_embeddings=chunk_embeddings,
+            top_k=3,
+        )
+
+        activity.logger.info(
+            "\n\nQUESTION: %s",
+            question.question,
+        )
+
+        activity.logger.info("\nTF-IDF RESULTS:")
+
+        for result in tfidf_results:
+            chunk = all_chunks[result.index]
+
+            activity.logger.info(
+                "\n%s\nSection: %s\nScore: %.3f\n%s",
+                chunk.chunk_id,
+                chunk.section,
+                result.score,
+                chunk.text[:500],
+            )
+
+        activity.logger.info("\nSEMANTIC RESULTS:")
+
+        for result in semantic_results:
+            chunk = all_chunks[result.index]
+
+            activity.logger.info(
+                "\n%s\nSection: %s\nScore: %.3f\n%s",
+                chunk.chunk_id,
+                chunk.section,
+                result.score,
+                chunk.text[:500],
+            )
+
+        hybrid_results = retrieve_chunks_hybrid(
+            query=query,
+            chunks=chunk_texts,
+            chunk_embeddings=chunk_embeddings,
+            top_k_per_method=5,
+            top_k=5,
+        )
+
+        activity.logger.info("\nHYBRID RESULTS:")
+
+        for result in hybrid_results:
+            chunk = all_chunks[result.index]
+
+            activity.logger.info(
+                "\n%s"
+            "\nSection: %s"
+            "\nRRF Score: %.5f"
+            "\nTF-IDF rank: %s"
+            "\nSemantic rank: %s"
+            "\n%s",
+            chunk.chunk_id,
+            chunk.section,
+            result.score,
+            result.tfidf_rank,
+            result.semantic_rank,
+            chunk.text[:500],
+        )
+
+        reranked_results = rerank_chunks(
+            query=query,
+            candidates=hybrid_results,
+            reranker=reranker,
+            top_k=3,
+        )
+
+        activity.logger.info("\nRERANKED RESULTS:")
+
+        for result in reranked_results:
+            chunk = all_chunks[result.index]
+
+            activity.logger.info(
+                "\n%s"
+                "\nSection: %s"
+                "\nReranker score: %.3f"
+                "\n%s",
+                chunk.chunk_id,
+                chunk.section,
+                result.score,
+                chunk.text[:500],
+        )
 
     queries = [
         f"{question.question}\n{question.rationale}"
