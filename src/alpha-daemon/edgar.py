@@ -1,5 +1,5 @@
 from bs4 import BeautifulSoup
-from datetime import date
+from datetime import date, datetime
 import httpx
 import re
 
@@ -42,6 +42,19 @@ SEC_SUBMISSIONS_URL = (
 RESEARCH_FORMS = {"10-K", "10-Q", "8-K"}
 
 
+def parse_sec_datetime(value: str) -> datetime:
+    dt = datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
+
+    if dt.tzinfo is None:
+        raise ValueError(
+            "SEC acceptance datetime must be timezone-aware"
+        )
+
+    return dt
+
+
 async def get_recent_filings(
     ticker: str,
     cik: str,
@@ -64,11 +77,18 @@ async def get_recent_filings(
         recent["accessionNumber"],
         recent["form"],
         recent["filingDate"],
+        recent["acceptanceDateTime"],
         recent["primaryDocument"],
         strict=True,
     )
 
-    for accession_number, form, filed_at, primary_document in rows:
+    for (
+        accession_number,
+        form,
+        filed_at,
+        available_at,
+        primary_document,
+    ) in rows:
         if form not in RESEARCH_FORMS:
             continue
 
@@ -79,6 +99,7 @@ async def get_recent_filings(
                 accession_number=accession_number,
                 form=form,
                 filed_at=date.fromisoformat(filed_at),
+                available_at=parse_sec_datetime(available_at),
                 primary_document=primary_document,
             )
         )
@@ -176,6 +197,7 @@ def filing_to_market_event(
 async def get_latest_filing_event(
     symbol: str,
     user_agent: str,
+    as_of: datetime,
 ) -> MarketEvent:
     cik = await get_cik_for_ticker(
         symbol,
@@ -188,12 +210,22 @@ async def get_latest_filing_event(
         user_agent=user_agent,
     )
 
-    if not filings:
+    eligible_filings = [
+        filing
+        for filing in filings
+        if filing.available_at <= as_of
+    ]
+
+    if not eligible_filings:
         raise NoRelevantFilingsError(
             f"No relevant SEC filings found for {symbol}"
+            f"as of {as_of.isoformat()}"
         )
 
-    filing = filings[0]
+    filing = max(
+        eligible_filings,
+        key=lambda filing: filing.available_at,
+    )
 
     document = await get_filing_document(
         filing,

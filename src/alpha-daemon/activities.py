@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
 import json
 import os
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
+from uuid import uuid4
 
 from edgar import (get_latest_filing_event, NoRelevantFilingsError)
 from llm import BedrockLLMClient
@@ -12,6 +14,7 @@ from models import (
     Hypothesis,
     Evidence,
     Recommendation,
+    ResearchRun,
 )
 from retrieval import (
     chunk_sec_event,
@@ -27,14 +30,30 @@ from retrieval import (
 
 @activity.defn
 async def fetch_market_events(
-    symbol: str,
+    run: ResearchRun,
 ) -> list[MarketEvent]:
+    if run.scope.kind != "security":
+        raise ApplicationError(
+            f"Unsupported research scope: {run.scope.kind}",
+            type="UnsupportedResearchScope",
+            non_retryable=True,
+        )
+
+    symbol = run.scope.attributes.get("symbol")
+    if not symbol:
+        raise ApplicationError(
+            "No symbol found in research scope",
+            type="InvalidResearchScope",
+            non_retryable=True,
+        )
+
     user_agent = os.environ["SEC_USER_AGENT"]
 
     try:
         filing_event = await get_latest_filing_event(
             symbol,
             user_agent=user_agent,
+            as_of=run.as_of,
         )
     except NoRelevantFilingsError as exc:
         raise ApplicationError(
@@ -156,9 +175,26 @@ Available evidence:
 
 @activity.defn
 async def plan_research(
-    symbol: str,
+    run: ResearchRun,
     events: list[MarketEvent],
 ) -> list[ResearchQuestion]:
+
+    if run.scope.kind != "security":
+        raise ApplicationError(
+            f"Unsupported research scope: {run.scope.kind}",
+            type="UnsupportedResearchScope",
+            non_retryable=True,
+        )
+
+    symbol = run.scope.attributes.get("symbol")
+
+    if not symbol:
+        raise ApplicationError(
+            "No symbol found in research scope",
+            type="InvalidResearchScope",
+            non_retryable=True,
+        )
+
     llm = BedrockLLMClient(
         model_id=os.getenv(
             "BEDROCK_MODEL_ID",
@@ -223,11 +259,17 @@ Recent events:
 
     data = json.loads(response.text)
 
+    questions_created_at = datetime.now(timezone.utc)
+
     questions = [
         ResearchQuestion(
+            question_id=f"{run.run_id}:question:{uuid4()}",
+            question_key=None,
             question=item["question"],
             rationale=item["rationale"],
             priority=item["priority"],
+            as_of=run.as_of,
+            created_at=questions_created_at,
         )
         for item in data["questions"]
     ]

@@ -34,15 +34,15 @@ class Recommendation(BaseModel):
 
 
 class ResearchQuestion(BaseModel):
-    # question_id: str
+    question_id: str
     question_key: str | None = None
 
     question: str
     rationale: str
     priority: int
 
-    # as_of: datetime
-    # created_at: datetime
+    as_of: datetime
+    created_at: datetime
 
 
 @dataclass
@@ -74,6 +74,7 @@ class Filing(BaseModel):
     accession_number: str
     form: str # 10K, 10-Q, 8K etc
     filed_at: date
+    available_at: datetime
     primary_document: str
 
 

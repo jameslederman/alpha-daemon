@@ -1,26 +1,29 @@
 from datetime import timedelta
 from temporalio import workflow
 
-
-
 with workflow.unsafe.imports_passed_through():
     from activities import fetch_market_events, analyze_events
-    from models import MarketEvent, Recommendation, ResearchQuestion
+    from models import (
+        MarketEvent,
+        Recommendation,
+        ResearchQuestion,
+        ResearchRun,
+    )
 
 
 @workflow.defn
 class ResearchWorkflow:
-    @workflow.run
-    async def run(self, symbol: str) -> Recommendation:
+    @workflow.run 
+    async def run(self, run: ResearchRun,) -> Recommendation:
         events = await workflow.execute_activity(
             "fetch_market_events",
-            symbol,
+            run,
             start_to_close_timeout=timedelta(seconds=30),
         )
 
         questions = await workflow.execute_activity(
             "plan_research",
-            args=[symbol, events],
+            args=[run, events],
             start_to_close_timeout=timedelta(seconds=60),
         )
 
