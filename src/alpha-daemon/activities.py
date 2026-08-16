@@ -8,19 +8,19 @@ from uuid import uuid4
 from edgar import (get_latest_filing_event, NoRelevantFilingsError)
 from llm import BedrockLLMClient
 from models import (
-    EvidenceChunk,
     MarketEvent,
     ResearchQuestion,
-    Hypothesis,
-    Evidence,
     Recommendation,
     ResearchRun,
+    EvidenceMatch,
+    QuestionEvidence,
+    ResearchFinding,
 )
+
 from retrieval import (
     chunk_sec_event,
     embed_chunks,
     retrieve_chunks,
-    retrieve_for_queries,
     retrieve_chunks_semantic,
     retrieve_chunks_hybrid,
     load_reranker,
@@ -63,114 +63,6 @@ async def fetch_market_events(
         ) from exc
 
     return [filing_event]
-
-@activity.defn
-async def analyze_events(
-    evidence_chunks: list[EvidenceChunk],
-    questions: list[ResearchQuestion],
-) -> Recommendation:
-    if not evidence_chunks:
-        raise ApplicationError(
-            "No relevant evidence chunks found",
-            type="NoRelevantEvidence",
-            non_retryable=True,
-        )
-
-    symbol = evidence_chunks[0].symbol
-
-    llm = BedrockLLMClient(
-        model_id=os.getenv(
-            "BEDROCK_MODEL_ID",
-            "amazon.nova-pro-v1:0",
-        )
-    )
-
-    evidence_text = "\n\n".join(
-        f"Evidence ID: {chunk.chunk_id}\n"
-        f"Section: {chunk.section}\n"
-        f"Source: {chunk.source_url}\n"
-        f"Text:\n{chunk.text}"
-        for chunk in evidence_chunks
-    )
-
-    question_text = "\n".join(
-        f"{question.priority}. {question.question}\n"
-        f"   Why it matters: {question.rationale}"
-        for question in questions
-    )
-
-    system_prompt = """
-You are an evidence-constrained equity research analyst.
-
-Evaluate the stock's 6-to-12-month fundamental outlook using only the supplied
-evidence. Use the research questions as an analytical checklist.
-
-Return only a JSON object conforming to this schema:
-
-{
-  "type": "object",
-  "properties": {
-    "action": {
-      "type": "string",
-      "enum": ["BUY", "HOLD", "SELL"]
-    },
-    "confidence": {
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0
-    },
-    "rationale": {
-      "type": "string"
-    }
-  },
-  "required": ["action", "confidence", "rationale"],
-  "additionalProperties": false
-}
-
-Rules:
-- action must be BUY, HOLD, or SELL.
-- confidence must be between 0.0 and 1.0.
-- Do not invent facts that are absent from the evidence.
-- Distinguish facts from interpretations.
-- Discuss material positive and negative evidence.
-- Reduce confidence when important questions cannot be answered.
-- Explain the key evidence and important limitations in the rationale.
-- Reference the supporting evidence IDs in the rationale.
-"""
-
-    user_prompt = f"""
-Symbol: {symbol}
-
-Research questions:
-
-{question_text}
-
-Available evidence:
-
-{evidence_text}
-"""
-
-    response = await llm.generate(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-    )
-
-    activity.logger.info(
-        "Analysis LLM call: "
-        f"request_id={response.request_id}, "
-        f"model={response.model_id}, "
-        f"tokens={response.usage.total_tokens}, "
-        f"latency_ms={response.latency_ms:.0f}"
-    )
-
-    data = json.loads(response.text)
-
-    return Recommendation(
-        symbol=symbol,
-        action=data["action"],
-        confidence=float(data["confidence"]),
-        rationale=data["rationale"],
-    )
 
 
 @activity.defn
@@ -291,7 +183,7 @@ Recent events:
 async def retrieve_evidence(
     events: list[MarketEvent],
     questions: list[ResearchQuestion],
-) -> list[EvidenceChunk]:
+) -> list[QuestionEvidence]:
     all_chunks = [
         chunk
         for event in events
@@ -306,6 +198,8 @@ async def retrieve_evidence(
     chunk_embeddings = embed_chunks(chunk_texts)
 
     reranker = load_reranker()
+
+    question_evidence: list[QuestionEvidence] = []
 
     for question in questions:
         query = (
@@ -406,31 +300,277 @@ async def retrieve_evidence(
                 chunk.section,
                 result.score,
                 chunk.text[:500],
+            )
+
+        hybrid_by_index = {
+            result.index: (rank, result)
+            for rank, result in enumerate(
+                hybrid_results,
+                start=1,
+            )
+        }
+
+        matches: list[EvidenceMatch] = []
+        for reranker_rank, result in enumerate(
+            reranked_results,
+            start=1,
+        ):
+            hybrid_rank, hybrid_result = hybrid_by_index[
+                result.index
+            ]
+
+            matches.append(
+                EvidenceMatch(
+                    chunk=all_chunks[result.index],
+                    tfidf_rank=hybrid_result.tfidf_rank,
+                    semantic_rank=hybrid_result.semantic_rank,
+                    hybrid_rank=hybrid_rank,
+                    rrf_score=hybrid_result.score,
+                    reranker_rank=reranker_rank,
+                    reranker_score=result.score,
+                )
+            )
+
+        question_evidence.append(
+            QuestionEvidence(
+                question=question,
+                evidence=matches,
+            )
+        )
+        activity.logger.info(
+            "Retrieved evidence for %d research questions",
+            len(question_evidence),
         )
 
-    queries = [
-        f"{question.question}\n{question.rationale}"
-        for question in questions
-    ]
+    return question_evidence
 
-    selected = retrieve_for_queries(
-        queries=queries,
-        chunks=[
-            chunk.text
-            for chunk in all_chunks
-        ],
-        top_k_per_query=2,
+
+@activity.defn
+async def answer_question(
+    question_evidence: QuestionEvidence,
+) -> ResearchFinding:
+    question = question_evidence.question
+
+    if not question_evidence.evidence:
+        raise ApplicationError(
+            f"No evidence found for question {question.question_id}",
+            type="NoQuestionEvidence",
+            non_retryable=True,
+        )
+
+    llm = BedrockLLMClient(
+        model_id=os.getenv(
+            "BEDROCK_MODEL_ID",
+            "amazon.nova-pro-v1:0",
+        )
     )
 
-    relevant_chunks = [
-        all_chunks[result.index]
-        for result in selected
-    ]
+    evidence_text = "\n\n".join(
+        f"Evidence ID: {match.chunk.chunk_id}\n"
+        f"Section: {match.chunk.section}\n"
+        f"Source: {match.chunk.source_url}\n"
+        f"Text:\n{match.chunk.text}"
+        for match in question_evidence.evidence
+    )
+
+    system_prompt = """
+You are an evidence-constrained financial research analyst.
+
+Answer one research question using only the supplied evidence.
+
+Return only valid JSON in this format:
+
+{
+  "answer": "string",
+  "confidence": 0.0,
+  "evidence_ids": ["string"]
+}
+
+Rules:
+- Answer the research question directly.
+- Do not make a BUY, HOLD, or SELL recommendation.
+- Do not invent facts absent from the evidence.
+- confidence must be between 0.0 and 1.0.
+- evidence_ids must contain only IDs from the supplied evidence.
+- Include only evidence that materially supports the answer.
+- Lower confidence when the evidence is incomplete or conflicting.
+"""
+
+    user_prompt = f"""
+Research question:
+{question.question}
+
+Why it matters:
+{question.rationale}
+
+Evidence:
+{evidence_text}
+"""
+
+    response = await llm.generate(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+
+    data = json.loads(response.text)
+
+    valid_evidence_ids = {
+        match.chunk.chunk_id
+        for match in question_evidence.evidence
+    }
+
+    returned_evidence_ids = data["evidence_ids"]
+
+    if not set(returned_evidence_ids).issubset(
+        valid_evidence_ids
+    ):
+        raise ValueError(
+            "Finding referenced evidence that was not supplied"
+        )
+
+    confidence = float(data["confidence"])
+
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError(
+            f"Invalid finding confidence: {confidence}"
+        )
+
+    created_at = datetime.now(timezone.utc)
+
+    finding = ResearchFinding(
+        finding_id=(
+            f"{question.question_id}:finding:{uuid4()}"
+        ),
+        question_id=question.question_id,
+        answer=data["answer"],
+        confidence=confidence,
+        evidence_ids=returned_evidence_ids,
+        as_of=question.as_of,
+        created_at=created_at,
+    )
 
     activity.logger.info(
-        "Retrieved %d of %d evidence chunks",
-        len(relevant_chunks),
-        len(all_chunks),
+        "Research finding: question_id=%s "
+        "confidence=%.2f evidence_count=%d "
+        "tokens=%d latency_ms=%.0f",
+        question.question_id,
+        finding.confidence,
+        len(finding.evidence_ids),
+        response.usage.total_tokens,
+        response.latency_ms,
     )
 
-    return relevant_chunks
+    return finding
+
+
+@activity.defn
+async def synthesize_recommendation(
+    run: ResearchRun,
+    findings: list[ResearchFinding],
+) -> Recommendation:
+    if not findings:
+        raise ApplicationError(
+            "No research findings available",
+            type="NoResearchFindings",
+            non_retryable=True,
+        )
+
+    if run.scope.kind != "security":
+        raise ApplicationError(
+            f"Unsupported research scope: {run.scope.kind}",
+            type="UnsupportedResearchScope",
+            non_retryable=True,
+        )
+
+    symbol = run.scope.attributes.get("symbol")
+
+    if not symbol:
+        raise ApplicationError(
+            "No symbol found in research scope",
+            type="InvalidResearchScope",
+            non_retryable=True,
+        )
+
+    llm = BedrockLLMClient(
+        model_id=os.getenv(
+            "BEDROCK_MODEL_ID",
+            "amazon.nova-pro-v1:0",
+        )
+    )
+
+    findings_text = "\n\n".join(
+        f"Finding ID: {finding.finding_id}\n"
+        f"Question ID: {finding.question_id}\n"
+        f"Confidence: {finding.confidence:.2f}\n"
+        f"Evidence IDs: {', '.join(finding.evidence_ids)}\n"
+        f"Finding:\n{finding.answer}"
+        for finding in findings
+    )
+
+    system_prompt = """
+You are an evidence-constrained equity research analyst.
+
+Synthesize the supplied research findings into a 6-to-12-month
+fundamental investment recommendation.
+
+Return only valid JSON in this format:
+
+{
+  "action": "BUY",
+  "confidence": 0.0,
+  "rationale": "string"
+}
+
+Rules:
+- action must be BUY, HOLD, or SELL.
+- confidence must be between 0.0 and 1.0.
+- Use only the supplied research findings.
+- Do not invent facts.
+- Consider both positive and negative findings.
+- Weight findings according to their confidence and materiality.
+- Reduce confidence when findings are incomplete, uncertain, or conflicting.
+- Explain the most important drivers of the recommendation.
+- Reference supporting evidence IDs in the rationale.
+"""
+
+    user_prompt = f"""
+Symbol: {symbol}
+
+Research findings:
+
+{findings_text}
+"""
+
+    response = await llm.generate(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+
+    data = json.loads(response.text)
+
+    confidence = float(data["confidence"])
+
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError(
+            f"Invalid recommendation confidence: {confidence}"
+        )
+
+    recommendation = Recommendation(
+        symbol=symbol,
+        action=data["action"],
+        confidence=confidence,
+        rationale=data["rationale"],
+    )
+
+    activity.logger.info(
+        "Recommendation synthesis: symbol=%s "
+        "findings=%d confidence=%.2f "
+        "tokens=%d latency_ms=%.0f",
+        symbol,
+        len(findings),
+        recommendation.confidence,
+        response.usage.total_tokens,
+        response.latency_ms,
+    )
+
+    return recommendation

@@ -45,23 +45,6 @@ class ResearchQuestion(BaseModel):
     created_at: datetime
 
 
-@dataclass
-class Evidence:
-    source: str
-    source_id: str
-    claim: str
-    relevance: str
-
-
-@dataclass
-class Hypothesis:
-    symbol: str
-    thesis: str
-    supporting_evidence: list[Evidence]
-    contradicting_evidence: list[Evidence]
-    confidence: float
-
-
 @dataclass(frozen=True)
 class ResearchRequest:
     symbol: str
@@ -86,5 +69,36 @@ class ResearchScope(BaseModel):
 class ResearchRun(BaseModel):
     run_id: str
     scope: ResearchScope
+    as_of: datetime
+    created_at: datetime
+
+
+class EvidenceMatch(BaseModel):
+    chunk: EvidenceChunk
+
+    tfidf_rank: int | None = None
+    semantic_rank: int | None = None
+
+    hybrid_rank: int
+    rrf_score: float
+
+    reranker_rank: int
+    reranker_score: float
+
+
+class QuestionEvidence(BaseModel):
+    question: ResearchQuestion
+    evidence: list[EvidenceMatch]
+
+
+class ResearchFinding(BaseModel):
+    finding_id: str
+    question_id: str
+
+    answer: str
+    confidence: float
+
+    evidence_ids: list[str]
+
     as_of: datetime
     created_at: datetime

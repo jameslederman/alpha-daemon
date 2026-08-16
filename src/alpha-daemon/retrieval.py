@@ -193,41 +193,6 @@ def retrieve_chunks(
     ]
 
 
-def retrieve_for_queries(
-    queries: list[str],
-    chunks: list[str],
-    top_k_per_query: int = 2,
-) -> list[RankedChunk]:
-    if top_k_per_query <= 0:
-        raise ValueError(
-            "top_k_per_query must be positive"
-        )
-
-    selected: dict[int, RankedChunk] = {}
-
-    for query in queries:
-        results = retrieve_chunks(
-            query=query,
-            chunks=chunks,
-            top_k=top_k_per_query,
-        )
-
-        for result in results:
-            existing = selected.get(result.index)
-
-            if (
-                existing is None
-                or result.score > existing.score
-            ):
-                selected[result.index] = result
-
-    # Present evidence in its original document order.
-    return sorted(
-        selected.values(),
-        key=lambda result: result.index,
-    )
-
-
 def find_sec_section_headings(
     text: str,
 ) -> list[tuple[int, str]]:

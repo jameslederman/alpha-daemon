@@ -8,7 +8,8 @@ from temporalio import workflow
 with workflow.unsafe.imports_passed_through():
     from workflows import ResearchWorkflow
     from activities import (
-        analyze_events,
+        synthesize_recommendation,
+        answer_question,
         fetch_market_events,
         plan_research,
         retrieve_evidence,
@@ -30,7 +31,8 @@ async def main():
             fetch_market_events,
             plan_research,
             retrieve_evidence,
-            analyze_events,
+            answer_question,
+            synthesize_recommendation,
         ]
     )
     print("Worker started.")
