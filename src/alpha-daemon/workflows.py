@@ -24,12 +24,17 @@ class ResearchWorkflow:
             start_to_close_timeout=timedelta(seconds=60),
         )
 
-        #log the questions
+        evidence_chunks = await workflow.execute_activity(
+            "retrieve_evidence",
+            args=[events, questions],
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
         workflow.logger.info(f"Research questions: {questions}")
 
         recommendation = await workflow.execute_activity(
             "analyze_events",
-            args=[events, questions],
+            args=[evidence_chunks, questions],
             start_to_close_timeout=timedelta(seconds=60),
         )
 

@@ -166,6 +166,10 @@ def filing_to_market_event(
             f"{filing.filed_at.isoformat()}"
         ),
         body=filing_text,
+        source="sec_edgar",
+        source_id=filing.accession_number,
+        source_url=get_filing_url(filing),
+        published_at=filing.filed_at,
     )
 
 # Orchestration function to get latest filing
@@ -206,17 +210,64 @@ async def get_latest_filing_event(
 
 ###############################################################################
 # this test runs when you execute edgar.py directly, but not later when activities.py imports get_cik_for_ticker
-import asyncio
-
 async def main() -> None:
     event = await get_latest_filing_event(
-        "SPY",
+        "AAPL",
         user_agent = "AlphaDaemon james.lederman@gmail.com"
     )
 
-    print(event.headline)
-    print(f"Body characters: {len(event.body):,}")
-    print(event.body[:1_000])
+    evidence_chunks = chunk_sec_event(event)
+
+    print(f"Evidence chunks: {len(evidence_chunks)}")
+
+    queries = [
+        (
+            "What are the key drivers of Apple's revenue "
+            "growth and gross margin?"
+        ),
+        (
+            "What material risks could negatively affect "
+            "Apple's future operating performance?"
+        ),
+        (
+            "How are Apple's geographic and product segments "
+            "performing relative to the prior year?"
+        ),
+    ]
+    
+    selected = retrieve_for_queries(
+        queries=queries,
+        chunks=[
+            chunk.text
+            for chunk in evidence_chunks
+        ],
+        top_k_per_query=2,
+    )
+
+    print(
+        f"Selected {len(selected)} of "
+        f"{len(evidence_chunks)} chunks"
+    )
+
+    for result in selected:
+        chunk = evidence_chunks[result.index]
+
+        print(
+            f"\n{chunk.chunk_id}"
+            f"\nSection: {chunk.section}"
+            f"\nScore: {result.score:.3f}"
+        )
+        print(chunk.text[:500])
 
 if __name__ == "__main__":
+    import asyncio
+    from retrieval import (
+        chunk_text,
+        retrieve_chunks,
+        retrieve_for_queries,
+        find_sec_section_headings,
+        split_sec_sections,
+        chunk_sec_event
+    )
+
     asyncio.run(main())

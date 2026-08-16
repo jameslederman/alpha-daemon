@@ -5,7 +5,18 @@ from temporalio.exceptions import ApplicationError
 
 from edgar import (get_latest_filing_event, NoRelevantFilingsError)
 from llm import BedrockLLMClient
-from models import MarketEvent, ResearchQuestion, Hypothesis, Evidence, Recommendation
+from models import (
+    EvidenceChunk,
+    MarketEvent,
+    ResearchQuestion,
+    Hypothesis,
+    Evidence,
+    Recommendation,
+)
+from retrieval import (
+    chunk_sec_event,
+    retrieve_for_queries,
+)
 
 
 @activity.defn
@@ -30,22 +41,110 @@ async def fetch_market_events(
 
 @activity.defn
 async def analyze_events(
-    events: list[MarketEvent],
+    evidence_chunks: list[EvidenceChunk],
     questions: list[ResearchQuestion],
 ) -> Recommendation:
-    symbol = events[0].symbol
-    action = "BUY"
-    confidence = 0.9
-    rationale = (
-        f"Placeholder analysis using {len(events)} event(s) "
-        f"and {len(questions)} research question(s)."
+    if not evidence_chunks:
+        raise ApplicationError(
+            "No relevant evidence chunks found",
+            type="NoRelevantEvidence",
+            non_retryable=True,
+        )
+
+    symbol = evidence_chunks[0].symbol
+
+    llm = BedrockLLMClient(
+        model_id=os.getenv(
+            "BEDROCK_MODEL_ID",
+            "amazon.nova-pro-v1:0",
+        )
     )
+
+    evidence_text = "\n\n".join(
+        f"Evidence ID: {chunk.chunk_id}\n"
+        f"Section: {chunk.section}\n"
+        f"Source: {chunk.source_url}\n"
+        f"Text:\n{chunk.text}"
+        for chunk in evidence_chunks
+    )
+
+    question_text = "\n".join(
+        f"{question.priority}. {question.question}\n"
+        f"   Why it matters: {question.rationale}"
+        for question in questions
+    )
+
+    system_prompt = """
+You are an evidence-constrained equity research analyst.
+
+Evaluate the stock's 6-to-12-month fundamental outlook using only the supplied
+evidence. Use the research questions as an analytical checklist.
+
+Return only a JSON object conforming to this schema:
+
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["BUY", "HOLD", "SELL"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "rationale": {
+      "type": "string"
+    }
+  },
+  "required": ["action", "confidence", "rationale"],
+  "additionalProperties": false
+}
+
+Rules:
+- action must be BUY, HOLD, or SELL.
+- confidence must be between 0.0 and 1.0.
+- Do not invent facts that are absent from the evidence.
+- Distinguish facts from interpretations.
+- Discuss material positive and negative evidence.
+- Reduce confidence when important questions cannot be answered.
+- Explain the key evidence and important limitations in the rationale.
+- Reference the supporting evidence IDs in the rationale.
+"""
+
+    user_prompt = f"""
+Symbol: {symbol}
+
+Research questions:
+
+{question_text}
+
+Available evidence:
+
+{evidence_text}
+"""
+
+    response = await llm.generate(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+
+    activity.logger.info(
+        "Analysis LLM call: "
+        f"request_id={response.request_id}, "
+        f"model={response.model_id}, "
+        f"tokens={response.usage.total_tokens}, "
+        f"latency_ms={response.latency_ms:.0f}"
+    )
+
+    data = json.loads(response.text)
 
     return Recommendation(
         symbol=symbol,
-        action=action,
-        confidence=confidence,
-        rationale=rationale,
+        action=data["action"],
+        confidence=float(data["confidence"]),
+        rationale=data["rationale"],
     )
 
 
@@ -138,3 +237,42 @@ Recent events:
         raise ValueError("Research question priorities must be unique")
 
     return sorted(questions, key=lambda q: q.priority)
+
+
+@activity.defn
+async def retrieve_evidence(
+    events: list[MarketEvent],
+    questions: list[ResearchQuestion],
+) -> list[EvidenceChunk]:
+    all_chunks = [
+        chunk
+        for event in events
+        for chunk in chunk_sec_event(event)
+    ]
+
+    queries = [
+        f"{question.question}\n{question.rationale}"
+        for question in questions
+    ]
+
+    selected = retrieve_for_queries(
+        queries=queries,
+        chunks=[
+            chunk.text
+            for chunk in all_chunks
+        ],
+        top_k_per_query=2,
+    )
+
+    relevant_chunks = [
+        all_chunks[result.index]
+        for result in selected
+    ]
+
+    activity.logger.info(
+        "Retrieved %d of %d evidence chunks",
+        len(relevant_chunks),
+        len(all_chunks),
+    )
+
+    return relevant_chunks

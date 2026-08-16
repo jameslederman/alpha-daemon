@@ -4,10 +4,26 @@ from pydantic import BaseModel
 from datetime import datetime, date
 
 
+class EvidenceChunk(BaseModel):
+    chunk_id: str
+    symbol: str
+    source: str
+    source_id: str
+    source_url: str | None
+    published_at: date | None
+    section: str
+    chunk_index: int
+    text: str
+
+
 class MarketEvent(BaseModel):
     symbol: str
     headline: str
     body: str
+    source: str | None = None
+    source_id: str | None = None
+    source_url: str | None = None
+    published_at: date | None = None
 
 
 class Recommendation(BaseModel):

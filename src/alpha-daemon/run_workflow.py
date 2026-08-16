@@ -1,3 +1,4 @@
+from temporalio.contrib.pydantic import pydantic_data_converter
 import asyncio
 from temporalio.client import Client
 from temporalio import workflow
@@ -7,7 +8,10 @@ with workflow.unsafe.imports_passed_through():
 
 async def main():
     # Connect client to the local temporal server
-    client = await Client.connect("localhost:7233")
+    client = await Client.connect(
+        "localhost:7233",
+        data_converter=pydantic_data_converter,
+    )
 
     # Execute the workflow
     result = await client.execute_workflow(
