@@ -6,13 +6,15 @@ from temporalio.worker import Worker
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from workflows import ResearchWorkflow
+    from workflows import ResearchWorkflow, ToolSmokeTestWorkflow
     from activities import (
-        synthesize_recommendation,
         answer_question,
+        execute_tool_activity,
+        fetch_market_context,
         fetch_market_events,
         plan_research,
         retrieve_evidence,
+        synthesize_recommendation,
     )
 
 async def main():
@@ -26,8 +28,10 @@ async def main():
     worker = Worker(
         client,
         task_queue="my-task-queue",
-        workflows=[ResearchWorkflow],
+        workflows=[ResearchWorkflow, ToolSmokeTestWorkflow],
         activities=[
+            execute_tool_activity,
+            fetch_market_context,
             fetch_market_events,
             plan_research,
             retrieve_evidence,

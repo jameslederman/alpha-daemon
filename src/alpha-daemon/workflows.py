@@ -1,6 +1,7 @@
 import asyncio
 from datetime import timedelta
 from temporalio import workflow
+from models import ToolRequest, ToolResult
 
 with workflow.unsafe.imports_passed_through():
     from models import (
@@ -64,3 +65,15 @@ class ResearchWorkflow:
         )
 
         return recommendation
+
+
+@workflow.defn
+class ToolSmokeTestWorkflow:
+    @workflow.run
+    async def run(self, request: ToolRequest) -> ToolResult:
+        return await workflow.execute_activity(
+            "execute_tool",
+            request,
+            result_type=ToolResult,
+            start_to_close_timeout=timedelta(seconds=30),
+        )

@@ -1,22 +1,36 @@
-from datetime import datetime, timezone
-import json
-import os
+import inspect, json, os
+
+from collections.abc import Sequence
+from datetime import datetime, timedelta, timezone
+from pydantic import BaseModel
 from temporalio import activity
+from temporalio.common import RawValue
 from temporalio.exceptions import ApplicationError
+from typing import get_type_hints
 from uuid import uuid4
 
 from edgar import (get_latest_filing_event, NoRelevantFilingsError)
 from llm import BedrockLLMClient
+from massive import MassiveMarketDataProvider
 from models import (
+    EvidenceMatch,
+    GetPriceHistoryArgs,
+    MarketBar,
+    MarketContext,
     MarketEvent,
+    ResearchFinding,
     ResearchQuestion,
     Recommendation,
     ResearchRun,
-    EvidenceMatch,
+    ToolRequest,
+    ToolResult,
     QuestionEvidence,
-    ResearchFinding,
 )
-
+from tools import (
+    execute_tool,
+    get_handler,
+    get_price_history
+)
 from retrieval import (
     chunk_sec_event,
     embed_chunks,
@@ -27,6 +41,79 @@ from retrieval import (
     rerank_chunks,
 )
 
+
+@activity.defn(name="execute_tool")
+async def execute_tool_activity(
+    request: ToolRequest,
+) -> ToolResult:
+    provider = MassiveMarketDataProvider()
+
+    result = await execute_tool(
+        request=request,
+        provider=provider,
+    )
+
+    activity.logger.info(
+        "Tool executed: call_id=%s tool=%s",
+        request.call_id,
+        request.tool_name,
+    )
+
+    return result
+
+@activity.defn
+async def fetch_market_context(run: ResearchRun) -> MarketContext:
+    if run.scope.kind != "security":
+        raise ApplicationError(
+            f"Unsupported research scope: {run.scope.kind}",
+            type="UnsupportedResearchScope",
+            non_retryable=True,
+        )
+
+    symbol = run.scope.attributes.get("symbol")
+    if not symbol:
+        raise ApplicationError(
+            "Security research scope is missing symbol",
+            type="MissingSymbol",
+            non_retryable=True,
+        )
+
+    provider = MassiveMarketDataProvider()
+
+    bars_start = (run.as_of - timedelta(days=90)).date()
+    bars_end = (run.as_of - timedelta(days=1)).date()
+
+    news_start = run.as_of - timedelta(days=7)
+
+    daily_bars = await provider.get_daily_bars(
+        symbol,
+        bars_start,
+        bars_end,
+    )
+
+    news = await provider.get_news(
+        symbol,
+        news_start,
+        run.as_of,
+        limit=100,
+    )
+
+    context = MarketContext(
+        symbol=symbol,
+        as_of=run.as_of,
+        daily_bars=daily_bars,
+        news=news,
+    )
+
+    activity.logger.info(
+        "Market context: symbol=%s bars=%d news=%d as_of=%s",
+        symbol,
+        len(daily_bars),
+        len(news),
+        run.as_of.isoformat(),
+    )
+
+    return context
 
 @activity.defn
 async def fetch_market_events(
