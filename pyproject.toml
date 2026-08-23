@@ -2,3 +2,9 @@
 venvPath = "."
 venv = "env"
 extraPaths = ["src/alpha-daemon"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

@@ -1,15 +1,16 @@
-from bs4 import BeautifulSoup
-from datetime import date, datetime
-import httpx
 import re
+from datetime import date, datetime
 
+import httpx
+from bs4 import BeautifulSoup
 from models import Filing, MarketEvent
-
 
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 
+
 class NoRelevantFilingsError(Exception):
     pass
+
 
 async def get_cik_for_ticker(
     ticker: str,
@@ -30,27 +31,19 @@ async def get_cik_for_ticker(
         if company["ticker"].upper() == ticker:
             return str(company["cik_str"]).zfill(10)
 
-    raise NoRelevantFilingsError(
-        f"No relevant SEC filings found for {ticker}"
-    )
+    raise NoRelevantFilingsError(f"No relevant SEC filings found for {ticker}")
 
 
-SEC_SUBMISSIONS_URL = (
-    "https://data.sec.gov/submissions/CIK{cik}.json"
-)
+SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 
 RESEARCH_FORMS = {"10-K", "10-Q", "8-K"}
 
 
 def parse_sec_datetime(value: str) -> datetime:
-    dt = datetime.fromisoformat(
-        value.replace("Z", "+00:00")
-    )
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
 
     if dt.tzinfo is None:
-        raise ValueError(
-            "SEC acceptance datetime must be timezone-aware"
-        )
+        raise ValueError("SEC acceptance datetime must be timezone-aware")
 
     return dt
 
@@ -134,6 +127,7 @@ async def get_filing_document(
 
     return response.text
 
+
 def extract_filing_text(document: str) -> str:
     soup = BeautifulSoup(document, "html.parser")
 
@@ -182,16 +176,14 @@ def filing_to_market_event(
 ) -> MarketEvent:
     return MarketEvent(
         symbol=filing.symbol,
-        headline=(
-            f"SEC {filing.form} filed on "
-            f"{filing.filed_at.isoformat()}"
-        ),
+        headline=(f"SEC {filing.form} filed on {filing.filed_at.isoformat()}"),
         body=filing_text,
         source="sec_edgar",
         source_id=filing.accession_number,
         source_url=get_filing_url(filing),
         published_at=filing.filed_at,
     )
+
 
 # Orchestration function to get latest filing
 async def get_latest_filing_event(
@@ -210,16 +202,11 @@ async def get_latest_filing_event(
         user_agent=user_agent,
     )
 
-    eligible_filings = [
-        filing
-        for filing in filings
-        if filing.available_at <= as_of
-    ]
+    eligible_filings = [filing for filing in filings if filing.available_at <= as_of]
 
     if not eligible_filings:
         raise NoRelevantFilingsError(
-            f"No relevant SEC filings found for {symbol}"
-            f"as of {as_of.isoformat()}"
+            f"No relevant SEC filings found for {symbol}as of {as_of.isoformat()}"
         )
 
     filing = max(

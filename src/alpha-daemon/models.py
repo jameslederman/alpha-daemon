@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from typing import Any, Literal
+from datetime import date, datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field
-from datetime import datetime, date
 
 
 class EvidenceChunk(BaseModel):
@@ -33,7 +34,7 @@ class Filing(BaseModel):
     symbol: str
     cik: str
     accession_number: str
-    form: str # 10K, 10-Q, 8K etc
+    form: str  # 10K, 10-Q, 8K etc
     filed_at: date
     available_at: datetime
     primary_document: str
@@ -55,13 +56,6 @@ class MarketBar(BaseModel):
     volume: float
     vwap: float | None = None
     transactions: int | None = None
-
-
-class MarketContext(BaseModel):
-    symbol: str
-    as_of: datetime
-    daily_bars: list[MarketBar] = Field(default_factory=list)
-    news: list[NewsArticle] = Field(default_factory=list)
 
 
 class MarketEvent(BaseModel):
@@ -139,15 +133,3 @@ class ResearchRun(BaseModel):
 class ResearchScope(BaseModel):
     kind: str
     attributes: dict[str, str] = Field(default_factory=dict)
-
-
-class ToolRequest(BaseModel):
-    call_id: str
-    tool_name: str
-    arguments: dict[str, Any]
-
-
-class ToolResult(BaseModel):
-    call_id: str
-    tool_name: str
-    output: Any

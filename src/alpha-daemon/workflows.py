@@ -1,26 +1,29 @@
 import asyncio
 from datetime import timedelta
+
 from temporalio import workflow
-from models import ToolRequest, ToolResult
 
 with workflow.unsafe.imports_passed_through():
-    from models import (
-        Recommendation,
-        ResearchRun,
-    )
     from activities import (
+        answer_question,
         fetch_market_events,
         plan_research,
         retrieve_evidence,
-        answer_question,
         synthesize_recommendation,
+    )
+    from models import (
+        Recommendation,
+        ResearchRun,
     )
 
 
 @workflow.defn
 class ResearchWorkflow:
-    @workflow.run 
-    async def run(self, run: ResearchRun,) -> Recommendation:
+    @workflow.run
+    async def run(
+        self,
+        run: ResearchRun,
+    ) -> Recommendation:
         events = await workflow.execute_activity(
             fetch_market_events,
             run,
@@ -65,15 +68,3 @@ class ResearchWorkflow:
         )
 
         return recommendation
-
-
-@workflow.defn
-class ToolSmokeTestWorkflow:
-    @workflow.run
-    async def run(self, request: ToolRequest) -> ToolResult:
-        return await workflow.execute_activity(
-            "execute_tool",
-            request,
-            result_type=ToolResult,
-            start_to_close_timeout=timedelta(seconds=30),
-        )

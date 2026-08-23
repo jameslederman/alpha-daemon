@@ -1,30 +1,25 @@
-import asyncio
 import argparse
+import asyncio
 from datetime import datetime, timezone
-from temporalio.client import Client
-from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio import workflow
 from uuid import uuid4
 
+from temporalio import workflow
+from temporalio.client import Client
+from temporalio.contrib.pydantic import pydantic_data_converter
+
 with workflow.unsafe.imports_passed_through():
-    from workflows import ResearchWorkflow
     from models import ResearchRun, ResearchScope
+    from workflows import ResearchWorkflow
 
 
 def parse_as_of(value: str) -> datetime:
     try:
-        dt = datetime.fromisoformat(
-            value.replace("Z", "+00:00")
-        )
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "as-of must be an ISO 8601 datetime"
-        ) from exc
+        raise argparse.ArgumentTypeError("as-of must be an ISO 8601 datetime") from exc
 
     if dt.tzinfo is None:
-        raise argparse.ArgumentTypeError(
-            "as-of must include a timezone"
-        )
+        raise argparse.ArgumentTypeError("as-of must include a timezone")
 
     return dt
 
@@ -88,8 +83,6 @@ async def main():
         data_converter=pydantic_data_converter,
     )
 
-    run_id = f"research_run:{uuid4()}"
-
     # Execute the workflow
     result = await client.execute_workflow(
         ResearchWorkflow.run,
@@ -99,6 +92,7 @@ async def main():
     )
 
     print(f"Workflow result: {result}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

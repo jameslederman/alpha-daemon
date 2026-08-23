@@ -1,7 +1,7 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import asyncio
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 import boto3
 
@@ -57,9 +57,7 @@ class BedrockLLMClient(LLMClient):
         response = await asyncio.to_thread(
             self.client.converse,
             modelId=self.model_id,
-            system=[
-                {"text": system_prompt}
-            ],
+            system=[{"text": system_prompt}],
             messages=[
                 {
                     "role": "user",

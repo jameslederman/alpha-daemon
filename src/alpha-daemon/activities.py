@@ -1,119 +1,35 @@
-import inspect, json, os
-
-from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
-from pydantic import BaseModel
-from temporalio import activity
-from temporalio.common import RawValue
-from temporalio.exceptions import ApplicationError
-from typing import get_type_hints
+import json
+import os
+from datetime import datetime, timezone
 from uuid import uuid4
 
-from edgar import (get_latest_filing_event, NoRelevantFilingsError)
+from edgar import NoRelevantFilingsError, get_latest_filing_event
 from llm import BedrockLLMClient
 from massive import MassiveMarketDataProvider
 from models import (
     EvidenceMatch,
     GetPriceHistoryArgs,
     MarketBar,
-    MarketContext,
     MarketEvent,
+    QuestionEvidence,
+    Recommendation,
     ResearchFinding,
     ResearchQuestion,
-    Recommendation,
     ResearchRun,
-    ToolRequest,
-    ToolResult,
-    QuestionEvidence,
-)
-from tools import (
-    execute_tool,
-    get_handler,
-    get_price_history
 )
 from retrieval import (
     chunk_sec_event,
     embed_chunks,
-    retrieve_chunks,
-    retrieve_chunks_semantic,
-    retrieve_chunks_hybrid,
     load_reranker,
     rerank_chunks,
+    retrieve_chunks,
+    retrieve_chunks_hybrid,
+    retrieve_chunks_semantic,
 )
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
+from tools import get_price_history
 
-
-@activity.defn(name="execute_tool")
-async def execute_tool_activity(
-    request: ToolRequest,
-) -> ToolResult:
-    provider = MassiveMarketDataProvider()
-
-    result = await execute_tool(
-        request=request,
-        provider=provider,
-    )
-
-    activity.logger.info(
-        "Tool executed: call_id=%s tool=%s",
-        request.call_id,
-        request.tool_name,
-    )
-
-    return result
-
-@activity.defn
-async def fetch_market_context(run: ResearchRun) -> MarketContext:
-    if run.scope.kind != "security":
-        raise ApplicationError(
-            f"Unsupported research scope: {run.scope.kind}",
-            type="UnsupportedResearchScope",
-            non_retryable=True,
-        )
-
-    symbol = run.scope.attributes.get("symbol")
-    if not symbol:
-        raise ApplicationError(
-            "Security research scope is missing symbol",
-            type="MissingSymbol",
-            non_retryable=True,
-        )
-
-    provider = MassiveMarketDataProvider()
-
-    bars_start = (run.as_of - timedelta(days=90)).date()
-    bars_end = (run.as_of - timedelta(days=1)).date()
-
-    news_start = run.as_of - timedelta(days=7)
-
-    daily_bars = await provider.get_daily_bars(
-        symbol,
-        bars_start,
-        bars_end,
-    )
-
-    news = await provider.get_news(
-        symbol,
-        news_start,
-        run.as_of,
-        limit=100,
-    )
-
-    context = MarketContext(
-        symbol=symbol,
-        as_of=run.as_of,
-        daily_bars=daily_bars,
-        news=news,
-    )
-
-    activity.logger.info(
-        "Market context: symbol=%s bars=%d news=%d as_of=%s",
-        symbol,
-        len(daily_bars),
-        len(news),
-        run.as_of.isoformat(),
-    )
-
-    return context
 
 @activity.defn
 async def fetch_market_events(
@@ -152,6 +68,26 @@ async def fetch_market_events(
     return [filing_event]
 
 
+@activity.defn(name="get_price_history")
+async def get_price_history_activity(
+    symbol: str,
+    start: str,
+    end: str,
+) -> list[MarketBar]:
+    provider = MassiveMarketDataProvider()
+
+    args = GetPriceHistoryArgs(
+        symbol=symbol,
+        start=start,
+        end=end,
+    )
+
+    return await get_price_history(
+        args=args,
+        provider=provider,
+    )
+
+
 @activity.defn
 async def plan_research(
     run: ResearchRun,
@@ -182,9 +118,7 @@ async def plan_research(
     )
 
     event_text = "\n\n".join(
-        f"Headline: {event.headline}\n"
-        f"Body: {event.body}"
-        for event in events
+        f"Headline: {event.headline}\nBody: {event.body}" for event in events
     )
 
     system_prompt = """
@@ -254,9 +188,7 @@ Recent events:
     ]
 
     if not 3 <= len(questions) <= 5:
-        raise ValueError(
-            f"Expected 3-5 research questions, got {len(questions)}"
-        )
+        raise ValueError(f"Expected 3-5 research questions, got {len(questions)}")
 
     priorities = [q.priority for q in questions]
 
@@ -271,16 +203,9 @@ async def retrieve_evidence(
     events: list[MarketEvent],
     questions: list[ResearchQuestion],
 ) -> list[QuestionEvidence]:
-    all_chunks = [
-        chunk
-        for event in events
-        for chunk in chunk_sec_event(event)
-    ]
+    all_chunks = [chunk for event in events for chunk in chunk_sec_event(event)]
 
-    chunk_texts = [
-        chunk.text
-        for chunk in all_chunks
-    ]
+    chunk_texts = [chunk.text for chunk in all_chunks]
 
     chunk_embeddings = embed_chunks(chunk_texts)
 
@@ -289,10 +214,7 @@ async def retrieve_evidence(
     question_evidence: list[QuestionEvidence] = []
 
     for question in questions:
-        query = (
-            f"{question.question}\n"
-            f"{question.rationale}"
-        )
+        query = f"{question.question}\n{question.rationale}"
 
         tfidf_results = retrieve_chunks(
             query=query,
@@ -353,18 +275,18 @@ async def retrieve_evidence(
 
             activity.logger.info(
                 "\n%s"
-            "\nSection: %s"
-            "\nRRF Score: %.5f"
-            "\nTF-IDF rank: %s"
-            "\nSemantic rank: %s"
-            "\n%s",
-            chunk.chunk_id,
-            chunk.section,
-            result.score,
-            result.tfidf_rank,
-            result.semantic_rank,
-            chunk.text[:500],
-        )
+                "\nSection: %s"
+                "\nRRF Score: %.5f"
+                "\nTF-IDF rank: %s"
+                "\nSemantic rank: %s"
+                "\n%s",
+                chunk.chunk_id,
+                chunk.section,
+                result.score,
+                result.tfidf_rank,
+                result.semantic_rank,
+                chunk.text[:500],
+            )
 
         reranked_results = rerank_chunks(
             query=query,
@@ -379,10 +301,7 @@ async def retrieve_evidence(
             chunk = all_chunks[result.index]
 
             activity.logger.info(
-                "\n%s"
-                "\nSection: %s"
-                "\nReranker score: %.3f"
-                "\n%s",
+                "\n%s\nSection: %s\nReranker score: %.3f\n%s",
                 chunk.chunk_id,
                 chunk.section,
                 result.score,
@@ -402,9 +321,7 @@ async def retrieve_evidence(
             reranked_results,
             start=1,
         ):
-            hybrid_rank, hybrid_result = hybrid_by_index[
-                result.index
-            ]
+            hybrid_rank, hybrid_result = hybrid_by_index[result.index]
 
             matches.append(
                 EvidenceMatch(
@@ -501,33 +418,22 @@ Evidence:
 
     data = json.loads(response.text)
 
-    valid_evidence_ids = {
-        match.chunk.chunk_id
-        for match in question_evidence.evidence
-    }
+    valid_evidence_ids = {match.chunk.chunk_id for match in question_evidence.evidence}
 
     returned_evidence_ids = data["evidence_ids"]
 
-    if not set(returned_evidence_ids).issubset(
-        valid_evidence_ids
-    ):
-        raise ValueError(
-            "Finding referenced evidence that was not supplied"
-        )
+    if not set(returned_evidence_ids).issubset(valid_evidence_ids):
+        raise ValueError("Finding referenced evidence that was not supplied")
 
     confidence = float(data["confidence"])
 
     if not 0.0 <= confidence <= 1.0:
-        raise ValueError(
-            f"Invalid finding confidence: {confidence}"
-        )
+        raise ValueError(f"Invalid finding confidence: {confidence}")
 
     created_at = datetime.now(timezone.utc)
 
     finding = ResearchFinding(
-        finding_id=(
-            f"{question.question_id}:finding:{uuid4()}"
-        ),
+        finding_id=(f"{question.question_id}:finding:{uuid4()}"),
         question_id=question.question_id,
         answer=data["answer"],
         confidence=confidence,
@@ -638,9 +544,7 @@ Research findings:
     confidence = float(data["confidence"])
 
     if not 0.0 <= confidence <= 1.0:
-        raise ValueError(
-            f"Invalid recommendation confidence: {confidence}"
-        )
+        raise ValueError(f"Invalid recommendation confidence: {confidence}")
 
     recommendation = Recommendation(
         symbol=symbol,

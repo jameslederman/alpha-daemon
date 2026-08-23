@@ -2,7 +2,6 @@ import os
 from datetime import date, datetime, timezone
 
 import httpx
-
 from models import MarketBar, NewsArticle
 
 
@@ -53,7 +52,7 @@ class MassiveMarketDataProvider:
             )
             for result in data.get("results", [])
         ]
-    
+
     async def get_news(
         self,
         symbol: str,

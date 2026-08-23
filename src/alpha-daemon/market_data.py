@@ -10,8 +10,7 @@ class MarketDataProvider(Protocol):
         symbol: str,
         start: date,
         end: date,
-    ) -> list[MarketBar]:
-        ...
+    ) -> list[MarketBar]: ...
 
     async def get_news(
         self,
@@ -19,5 +18,4 @@ class MarketDataProvider(Protocol):
         start: datetime,
         end: datetime,
         limit: int = 100,
-    ) -> list[NewsArticle]:
-        ...
+    ) -> list[NewsArticle]: ...

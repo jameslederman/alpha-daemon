@@ -1,15 +1,14 @@
-from functools import cache
-import boto3
-from dataclasses import dataclass
 import json
-import numpy as np
 import re
+from dataclasses import dataclass
+from functools import cache
+
+import boto3
+import numpy as np
+from models import EvidenceChunk, MarketEvent
 from sentence_transformers import CrossEncoder
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
-from models import EvidenceChunk, MarketEvent
-
 
 BARE_ITEM_PATTERN = re.compile(
     r"^ITEM\s+\d+[A-Z]?\.?$",
@@ -65,9 +64,7 @@ def chunk_text(
         raise ValueError("max_chars must be positive")
 
     paragraphs = [
-        paragraph.strip()
-        for paragraph in text.splitlines()
-        if paragraph.strip()
+        paragraph.strip() for paragraph in text.splitlines() if paragraph.strip()
     ]
 
     chunks: list[str] = []
@@ -104,6 +101,7 @@ def chunk_text(
 
     return chunks
 
+
 def chunk_sec_event(
     event: MarketEvent,
     max_chars: int = 4_000,
@@ -123,9 +121,7 @@ def chunk_sec_event(
             max_chars=max_chars,
         )
 
-        for chunk_index, text in enumerate(
-            section_chunks
-        ):
+        for chunk_index, text in enumerate(section_chunks):
             chunk_id = (
                 f"{event.source}:"
                 f"{event.source_id}:"
@@ -143,10 +139,7 @@ def chunk_sec_event(
                     published_at=event.published_at,
                     section=section.heading,
                     chunk_index=chunk_index,
-                    text=(
-                        f"Section: {section.heading}\n\n"
-                        f"{text}"
-                    ),
+                    text=(f"Section: {section.heading}\n\n{text}"),
                 )
             )
 
@@ -172,9 +165,7 @@ def retrieve_chunks(
         ngram_range=(1, 2),
     )
 
-    matrix = vectorizer.fit_transform(
-        [query, *chunks]
-    )
+    matrix = vectorizer.fit_transform([query, *chunks])
 
     scores = cosine_similarity(
         matrix[0:1],
@@ -198,19 +189,11 @@ def find_sec_section_headings(
 ) -> list[tuple[int, str]]:
     headings: list[tuple[int, str]] = []
 
-    for line_number, raw_line in enumerate(
-        text.splitlines()
-    ):
+    for line_number, raw_line in enumerate(text.splitlines()):
         line = " ".join(raw_line.split())
 
-        if (
-            line
-            and len(line) <= 200
-            and SEC_SECTION_PATTERN.fullmatch(line)
-        ):
-            headings.append(
-                (line_number, line)
-            )
+        if line and len(line) <= 200 and SEC_SECTION_PATTERN.fullmatch(line):
+            headings.append((line_number, line))
 
     return headings
 
@@ -222,26 +205,19 @@ def split_sec_sections(
 
     headings = [
         (line_number, heading)
-        for line_number, heading
-        in find_sec_section_headings(text)
+        for line_number, heading in find_sec_section_headings(text)
         if heading.upper().startswith("ITEM ")
         and not BARE_ITEM_PATTERN.fullmatch(heading)
     ]
 
     sections: list[DocumentSection] = []
 
-    for position, (line_number, heading) in enumerate(
-        headings
-    ):
+    for position, (line_number, heading) in enumerate(headings):
         next_line_number = (
-            headings[position + 1][0]
-            if position + 1 < len(headings)
-            else len(lines)
+            headings[position + 1][0] if position + 1 < len(headings) else len(lines)
         )
 
-        section_text = "\n".join(
-            lines[line_number + 1 : next_line_number]
-        ).strip()
+        section_text = "\n".join(lines[line_number + 1 : next_line_number]).strip()
 
         if section_text:
             sections.append(
@@ -253,12 +229,14 @@ def split_sec_sections(
 
     return sections
 
+
 @cache
 def get_bedrock_runtime():
     return boto3.client(
         "bedrock-runtime",
         region_name="us-east-1",
     )
+
 
 def embed_text(
     text: str,
@@ -286,10 +264,7 @@ def embed_chunks(
     chunks: list[str],
 ) -> np.ndarray:
     return np.array(
-        [
-            embed_text(chunk)
-            for chunk in chunks
-        ],
+        [embed_text(chunk) for chunk in chunks],
         dtype=np.float32,
     )
 
@@ -310,10 +285,7 @@ def retrieve_chunks_semantic(
         raise ValueError("top_k must be positive")
 
     if len(chunks) != len(chunk_embeddings):
-        raise ValueError(
-            "chunks and chunk_embeddings must have "
-            "the same length"
-        )
+        raise ValueError("chunks and chunk_embeddings must have the same length")
 
     query_embedding = np.array(
         embed_text(query),
@@ -371,10 +343,7 @@ def retrieve_chunks_hybrid(
         )
     }
 
-    candidate_indices = (
-        set(tfidf_ranks)
-        | set(semantic_ranks)
-    )
+    candidate_indices = set(tfidf_ranks) | set(semantic_ranks)
 
     results: list[HybridRankedChunk] = []
 
@@ -406,9 +375,11 @@ def retrieve_chunks_hybrid(
         reverse=True,
     )[:top_k]
 
+
 @cache
 def load_reranker() -> CrossEncoder:
     return CrossEncoder(RERANKER_MODEL_ID)
+
 
 def rerank_chunks(
     query: str,
@@ -419,10 +390,7 @@ def rerank_chunks(
     if not candidates:
         return []
 
-    documents = [
-        candidate.text
-        for candidate in candidates
-    ]
+    documents = [candidate.text for candidate in candidates]
 
     rankings = reranker.rank(
         query,
@@ -432,12 +400,8 @@ def rerank_chunks(
 
     return [
         RerankedChunk(
-            index=candidates[
-                int(result["corpus_id"])
-            ].index,
-            text=candidates[
-                int(result["corpus_id"])
-            ].text,
+            index=candidates[int(result["corpus_id"])].index,
+            text=candidates[int(result["corpus_id"])].text,
             score=float(result["score"]),
         )
         for result in rankings
