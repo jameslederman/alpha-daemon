@@ -11,11 +11,13 @@ from models import (
     GetPriceHistoryArgs,
     MarketBar,
     MarketEvent,
+    NewsArticle,
     QuestionEvidence,
     Recommendation,
     ResearchFinding,
     ResearchQuestion,
     ResearchRun,
+    SearchCompanyNewsArgs,
 )
 from retrieval import (
     chunk_sec_event,
@@ -28,7 +30,7 @@ from retrieval import (
 )
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
-from tools import get_price_history
+from tools import get_price_history, search_company_news
 
 
 @activity.defn
@@ -74,6 +76,8 @@ async def get_price_history_activity(
     start: str,
     end: str,
 ) -> list[MarketBar]:
+    """Get daily historical OHLCV price data for a security over a date range."""
+
     provider = MassiveMarketDataProvider()
 
     args = GetPriceHistoryArgs(
@@ -83,6 +87,30 @@ async def get_price_history_activity(
     )
 
     return await get_price_history(
+        args=args,
+        provider=provider,
+    )
+
+
+@activity.defn(name="search_company_news")
+async def search_company_news_activity(
+    symbol: str,
+    start: str,
+    end: str,
+    limit: int = 100,
+) -> list[NewsArticle]:
+    """Search for company news published over a date range."""
+
+    provider = MassiveMarketDataProvider()
+
+    args = SearchCompanyNewsArgs(
+        symbol=symbol,
+        start=start,
+        end=end,
+        limit=limit,
+    )
+
+    return await search_company_news(
         args=args,
         provider=provider,
     )

@@ -14,10 +14,11 @@ with workflow.unsafe.imports_passed_through():
         get_price_history_activity,
         plan_research,
         retrieve_evidence,
+        search_company_news_activity,
         synthesize_recommendation,
     )
     from strands_smoke import StrandsSmokeTestWorkflow
-    from workflows import ResearchWorkflow
+    from workflows import FundamentalAnalysisWorkflow, ResearchWorkflow
 
 
 async def main():
@@ -39,10 +40,15 @@ async def main():
     worker = Worker(
         client,
         task_queue="my-task-queue",
-        workflows=[ResearchWorkflow, StrandsSmokeTestWorkflow],
+        workflows=[
+            FundamentalAnalysisWorkflow,
+            ResearchWorkflow,
+            StrandsSmokeTestWorkflow,
+        ],
         activities=[
             fetch_market_events,
             get_price_history_activity,
+            search_company_news_activity,
             plan_research,
             retrieve_evidence,
             answer_question,

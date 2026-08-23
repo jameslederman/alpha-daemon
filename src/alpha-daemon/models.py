@@ -40,6 +40,14 @@ class Filing(BaseModel):
     primary_document: str
 
 
+class FundamentalAnalysis(BaseModel):
+    symbol: str
+    summary: str
+    strengths: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    confidence: float
+
+
 class GetPriceHistoryArgs(BaseModel):
     symbol: str
     start: date
@@ -133,3 +141,10 @@ class ResearchRun(BaseModel):
 class ResearchScope(BaseModel):
     kind: str
     attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class SearchCompanyNewsArgs(BaseModel):
+    symbol: str
+    start: datetime
+    end: datetime
+    limit: int = 100

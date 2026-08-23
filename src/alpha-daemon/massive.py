@@ -60,6 +60,12 @@ class MassiveMarketDataProvider:
         end: datetime,
         limit: int = 100,
     ) -> list[NewsArticle]:
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+
         url = f"{self.BASE_URL}/v2/reference/news"
 
         async with httpx.AsyncClient(timeout=30.0) as client:

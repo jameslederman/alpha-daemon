@@ -11,7 +11,9 @@ with workflow.unsafe.imports_passed_through():
         retrieve_evidence,
         synthesize_recommendation,
     )
+    from fundamental_analyst import FundamentalAnalyst
     from models import (
+        FundamentalAnalysis,
         Recommendation,
         ResearchRun,
     )
@@ -68,3 +70,21 @@ class ResearchWorkflow:
         )
 
         return recommendation
+
+
+@workflow.defn
+class FundamentalAnalysisWorkflow:
+    def __init__(self) -> None:
+        self.analyst = FundamentalAnalyst()
+
+    @workflow.run
+    async def run(
+        self,
+        run: ResearchRun,
+    ) -> FundamentalAnalysis:
+        symbol = run.scope.attributes["symbol"]
+
+        return await self.analyst.analyze(
+            symbol=symbol,
+            as_of=run.as_of,
+        )
