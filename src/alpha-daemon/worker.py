@@ -15,6 +15,7 @@ with workflow.unsafe.imports_passed_through():
         plan_research,
         retrieve_evidence,
         search_company_news_activity,
+        search_sec_filings_activity,
         synthesize_recommendation,
     )
     from strands_smoke import StrandsSmokeTestWorkflow
@@ -49,6 +50,7 @@ async def main():
             fetch_market_events,
             get_price_history_activity,
             search_company_news_activity,
+            search_sec_filings_activity,
             plan_research,
             retrieve_evidence,
             answer_question,

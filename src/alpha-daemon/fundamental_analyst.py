@@ -8,6 +8,7 @@ with workflow.unsafe.imports_passed_through():
     from activities import (
         get_price_history_activity,
         search_company_news_activity,
+        search_sec_filings_activity,
     )
     from models import FundamentalAnalysis
 
@@ -51,6 +52,10 @@ class FundamentalAnalyst:
                 activity_as_tool(
                     search_company_news_activity,
                     start_to_close_timeout=timedelta(seconds=30),
+                ),
+                activity_as_tool(
+                    search_sec_filings_activity,
+                    start_to_close_timeout=timedelta(minutes=2),
                 ),
             ],
         )

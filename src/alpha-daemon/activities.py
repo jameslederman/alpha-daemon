@@ -18,6 +18,7 @@ from models import (
     ResearchQuestion,
     ResearchRun,
     SearchCompanyNewsArgs,
+    SearchSecFilingsArgs,
 )
 from retrieval import (
     chunk_sec_event,
@@ -30,7 +31,7 @@ from retrieval import (
 )
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
-from tools import get_price_history, search_company_news
+from tools import get_price_history, search_company_news, search_sec_filings
 
 
 @activity.defn
@@ -482,6 +483,30 @@ Evidence:
     )
 
     return finding
+
+
+@activity.defn(name="search_sec_filings")
+async def search_sec_filings_activity(
+    symbol: str,
+    query: str,
+    start: str,
+    end: str,
+    limit: int = 5,
+) -> list[EvidenceMatch]:
+    """Search SEC filings for evidence relevant to a fundamental research question."""
+
+    args = SearchSecFilingsArgs(
+        symbol=symbol,
+        query=query,
+        start=start,
+        end=end,
+        limit=limit,
+    )
+
+    return await search_sec_filings(
+        args=args,
+        user_agent=os.environ["SEC_USER_AGENT"],
+    )
 
 
 @activity.defn

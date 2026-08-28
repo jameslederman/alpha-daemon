@@ -1,11 +1,17 @@
+import asyncio
 import re
-from datetime import date, datetime
+import time
+from datetime import date, datetime, timezone
 
 import httpx
 from bs4 import BeautifulSoup
 from models import Filing, MarketEvent
 
+SEC_REQUEST_INTERVAL_SECONDS = 0.2  # 5 requests/second
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+
+_sec_request_lock = asyncio.Lock()
+_sec_last_request_at = 0.0
 
 
 class NoRelevantFilingsError(Exception):
@@ -19,11 +25,7 @@ async def get_cik_for_ticker(
     ticker = ticker.strip().upper()
 
     async with httpx.AsyncClient() as client:
-        response = await client.get(
-            SEC_TICKERS_URL,
-            headers={"User-Agent": user_agent},
-            timeout=30.0,
-        )
+        response = await sec_get(client, SEC_TICKERS_URL, user_agent)
         response.raise_for_status()
         companies = response.json()
 
@@ -56,11 +58,7 @@ async def get_recent_filings(
     url = SEC_SUBMISSIONS_URL.format(cik=cik.zfill(10))
 
     async with httpx.AsyncClient() as client:
-        response = await client.get(
-            url,
-            headers={"User-Agent": user_agent},
-            timeout=30.0,
-        )
+        response = await sec_get(client, url, user_agent)
         response.raise_for_status()
         recent = response.json()["filings"]["recent"]
 
@@ -117,12 +115,7 @@ async def get_filing_document(
     url = get_filing_url(filing)
 
     async with httpx.AsyncClient() as client:
-        response = await client.get(
-            url,
-            headers={"User-Agent": user_agent},
-            timeout=30.0,
-            follow_redirects=True,
-        )
+        response = await sec_get(client, url, user_agent)
         response.raise_for_status()
 
     return response.text
@@ -168,6 +161,76 @@ def extract_filing_text(document: str) -> str:
             cleaned_lines.append(line)
 
     return "\n".join(cleaned_lines)
+
+
+async def get_filings_between(
+    symbol: str,
+    user_agent: str,
+    start: datetime,
+    end: datetime,
+) -> list[Filing]:
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+
+    cik = await get_cik_for_ticker(
+        symbol,
+        user_agent=user_agent,
+    )
+
+    filings = await get_recent_filings(
+        ticker=symbol,
+        cik=cik,
+        user_agent=user_agent,
+    )
+
+    eligible_filings = [
+        filing for filing in filings if start <= filing.available_at <= end
+    ]
+
+    return sorted(
+        eligible_filings,
+        key=lambda filing: filing.filed_at,
+        reverse=True,
+    )
+
+
+async def get_filing_events_between(
+    symbol: str,
+    user_agent: str,
+    start: datetime,
+    end: datetime,
+) -> list[MarketEvent]:
+    filings = await get_filings_between(
+        symbol=symbol,
+        user_agent=user_agent,
+        start=start,
+        end=end,
+    )
+
+    documents = await asyncio.gather(
+        *[
+            get_filing_document(
+                filing,
+                user_agent=user_agent,
+            )
+            for filing in filings
+        ]
+    )
+
+    return [
+        filing_to_market_event(
+            filing,
+            extract_filing_text(document),
+        )
+        for filing, document in zip(
+            filings,
+            documents,
+            strict=True,
+        )
+    ]
 
 
 def filing_to_market_event(
@@ -225,3 +288,29 @@ async def get_latest_filing_event(
         filing,
         filing_text,
     )
+
+
+async def sec_get(
+    client: httpx.AsyncClient,
+    url: str,
+    user_agent: str,
+) -> httpx.Response:
+    global _sec_last_request_at
+
+    async with _sec_request_lock:
+        now = time.monotonic()
+        wait_seconds = _sec_last_request_at + SEC_REQUEST_INTERVAL_SECONDS - now
+
+        if wait_seconds > 0:
+            await asyncio.sleep(wait_seconds)
+
+        response = await client.get(
+            url,
+            headers={"User-Agent": user_agent},
+            timeout=30.0,
+            follow_redirects=True,
+        )
+
+        _sec_last_request_at = time.monotonic()
+
+    return response

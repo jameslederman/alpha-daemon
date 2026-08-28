@@ -148,3 +148,11 @@ class SearchCompanyNewsArgs(BaseModel):
     start: datetime
     end: datetime
     limit: int = 100
+
+
+class SearchSecFilingsArgs(BaseModel):
+    symbol: str
+    query: str
+    start: datetime
+    end: datetime
+    limit: int = 50
