@@ -1,14 +1,23 @@
 import asyncio
+import os
 import re
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from functools import cache
+from pathlib import Path
 
 import httpx
+from artifact_store import ArtifactStore
 from bs4 import BeautifulSoup
 from models import Filing, MarketEvent
 
 SEC_REQUEST_INTERVAL_SECONDS = 0.2  # 5 requests/second
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SEC_HTTP_ARTIFACT_SOURCE = "sec_edgar_http"
+SEC_TICKERS_CACHE_TTL = timedelta(days=1)
+SEC_SUBMISSIONS_CACHE_TTL = timedelta(minutes=30)
+RESEARCH_FORMS = {"10-K", "10-Q", "8-K"}
 
 _sec_request_lock = asyncio.Lock()
 _sec_last_request_at = 0.0
@@ -16,6 +25,15 @@ _sec_last_request_at = 0.0
 
 class NoRelevantFilingsError(Exception):
     pass
+
+
+@cache
+def get_default_artifact_store(root_path: str | None = None) -> ArtifactStore:
+    resolved_path = root_path or os.getenv(
+        "ALPHA_DAEMON_DATA_DIR",
+        str(Path(".alpha-daemon")),
+    )
+    return ArtifactStore(resolved_path)
 
 
 async def get_cik_for_ticker(
@@ -34,11 +52,6 @@ async def get_cik_for_ticker(
             return str(company["cik_str"]).zfill(10)
 
     raise NoRelevantFilingsError(f"No relevant SEC filings found for {ticker}")
-
-
-SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
-
-RESEARCH_FORMS = {"10-K", "10-Q", "8-K"}
 
 
 def parse_sec_datetime(value: str) -> datetime:
@@ -269,7 +282,7 @@ async def get_latest_filing_event(
 
     if not eligible_filings:
         raise NoRelevantFilingsError(
-            f"No relevant SEC filings found for {symbol}as of {as_of.isoformat()}"
+            f"No relevant SEC filings found for {symbol} as of {as_of.isoformat()}"
         )
 
     filing = max(
@@ -290,14 +303,48 @@ async def get_latest_filing_event(
     )
 
 
+def get_sec_cache_ttl(url: str) -> timedelta | None:
+    if "/Archives/edgar/data/" in url:
+        return None
+    if url == SEC_TICKERS_URL:
+        return SEC_TICKERS_CACHE_TTL
+    if url.startswith("https://data.sec.gov/submissions/"):
+        return SEC_SUBMISSIONS_CACHE_TTL
+    return SEC_SUBMISSIONS_CACHE_TTL
+
+
+def _cached_response(
+    url: str, artifact_content: bytes, metadata: dict
+) -> httpx.Response:
+    return httpx.Response(
+        status_code=int(metadata.get("status_code", 200)),
+        headers=metadata.get("headers", {}),
+        content=artifact_content,
+        request=httpx.Request("GET", url),
+    )
+
+
 async def sec_get(
     client: httpx.AsyncClient,
     url: str,
     user_agent: str,
+    *,
+    artifact_store: ArtifactStore | None = None,
 ) -> httpx.Response:
     global _sec_last_request_at
 
+    store = artifact_store or get_default_artifact_store()
+    source_id = store.request_fingerprint("GET", url)
+    artifact = store.get(SEC_HTTP_ARTIFACT_SOURCE, source_id)
+    if artifact is not None:
+        return _cached_response(url, artifact.content, artifact.metadata)
+
     async with _sec_request_lock:
+        # Recheck after acquiring the lock so concurrent callers do not refetch.
+        artifact = store.get(SEC_HTTP_ARTIFACT_SOURCE, source_id)
+        if artifact is not None:
+            return _cached_response(url, artifact.content, artifact.metadata)
+
         now = time.monotonic()
         wait_seconds = _sec_last_request_at + SEC_REQUEST_INTERVAL_SECONDS - now
 
@@ -312,5 +359,24 @@ async def sec_get(
         )
 
         _sec_last_request_at = time.monotonic()
+
+        if response.is_success:
+            retrieved_at = datetime.now(timezone.utc)
+            cache_ttl = get_sec_cache_ttl(url)
+            expires_at = retrieved_at + cache_ttl if cache_ttl is not None else None
+            store.put(
+                source=SEC_HTTP_ARTIFACT_SOURCE,
+                source_id=source_id,
+                content=response.content,
+                media_type=response.headers.get("content-type"),
+                retrieved_at=retrieved_at,
+                expires_at=expires_at,
+                metadata={
+                    "method": "GET",
+                    "url": url,
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                },
+            )
 
     return response

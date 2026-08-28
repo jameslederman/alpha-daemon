@@ -1,3 +1,9 @@
 .DS_Store
+.env
+.venv/
+env/
 .vscode/
+.alpha-daemon/
 __pycache__/
+*.py[cod]
+
