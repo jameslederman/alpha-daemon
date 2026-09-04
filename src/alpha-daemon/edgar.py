@@ -6,6 +6,11 @@ from datetime import date, datetime, timezone
 import httpx
 from bs4 import BeautifulSoup
 from models import Filing, MarketEvent
+from storage import (
+    get_cached_sec_filing,
+    sec_filing_lock,
+    upsert_sec_filing,
+)
 
 SEC_REQUEST_INTERVAL_SECONDS = 0.2  # 5 requests/second
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -95,7 +100,11 @@ async def get_recent_filings(
             )
         )
 
-    return filings
+    return parse_filings_block(
+        ticker=ticker,
+        cik=cik,
+        data=recent,
+    )
 
 
 def get_filing_url(filing: Filing) -> str:
@@ -112,13 +121,92 @@ async def get_filing_document(
     filing: Filing,
     user_agent: str,
 ) -> str:
-    url = get_filing_url(filing)
+    cached = await get_cached_sec_filing(filing.accession_number)
+
+    if cached is not None:
+        raw_html, _ = cached
+        return raw_html
+
+    async with sec_filing_lock(filing.accession_number):
+        cached = await get_cached_sec_filing(filing.accession_number)
+
+        if cached is not None:
+            raw_html, _ = cached
+            return raw_html
+
+        url = get_filing_url(filing)
+
+        async with httpx.AsyncClient() as client:
+            response = await sec_get(
+                client,
+                url,
+                user_agent,
+            )
+            response.raise_for_status()
+
+        raw_html = response.text
+        cleaned_text = extract_filing_text(raw_html)
+
+        await upsert_sec_filing(
+            filing=filing,
+            source_url=url,
+            raw_html=raw_html,
+            cleaned_text=cleaned_text,
+        )
+
+        return raw_html
+
+
+async def get_filings_inventory(
+    ticker: str,
+    cik: str,
+    user_agent: str,
+    start: datetime,
+    end: datetime,
+) -> list[Filing]:
+    url = SEC_SUBMISSIONS_URL.format(cik=cik.zfill(10))
 
     async with httpx.AsyncClient() as client:
         response = await sec_get(client, url, user_agent)
         response.raise_for_status()
+        submissions = response.json()
 
-    return response.text
+        filings = parse_filings_block(
+            ticker=ticker,
+            cik=cik,
+            data=submissions["filings"]["recent"],
+        )
+
+        for historical_file in submissions["filings"].get("files", []):
+            filing_from = date.fromisoformat(historical_file["filingFrom"])
+            filing_to = date.fromisoformat(historical_file["filingTo"])
+
+            if filing_to < start.date():
+                continue
+
+            if filing_from > end.date():
+                continue
+
+            historical_url = (
+                "https://data.sec.gov/submissions/" f"{historical_file['name']}"
+            )
+
+            historical_response = await sec_get(
+                client,
+                historical_url,
+                user_agent,
+            )
+            historical_response.raise_for_status()
+
+            filings.extend(
+                parse_filings_block(
+                    ticker=ticker,
+                    cik=cik,
+                    data=historical_response.json(),
+                )
+            )
+
+    return [filing for filing in filings if start <= filing.available_at <= end]
 
 
 def extract_filing_text(document: str) -> str:
@@ -180,18 +268,16 @@ async def get_filings_between(
         user_agent=user_agent,
     )
 
-    filings = await get_recent_filings(
+    filings = await get_filings_inventory(
         ticker=symbol,
         cik=cik,
         user_agent=user_agent,
+        start=start,
+        end=end,
     )
 
-    eligible_filings = [
-        filing for filing in filings if start <= filing.available_at <= end
-    ]
-
     return sorted(
-        eligible_filings,
+        filings,
         key=lambda filing: filing.filed_at,
         reverse=True,
     )
@@ -314,3 +400,44 @@ async def sec_get(
         _sec_last_request_at = time.monotonic()
 
     return response
+
+
+def parse_filings_block(
+    ticker: str,
+    cik: str,
+    data: dict,
+) -> list[Filing]:
+    filings: list[Filing] = []
+
+    rows = zip(
+        data["accessionNumber"],
+        data["form"],
+        data["filingDate"],
+        data["acceptanceDateTime"],
+        data["primaryDocument"],
+        strict=True,
+    )
+
+    for (
+        accession_number,
+        form,
+        filed_at,
+        available_at,
+        primary_document,
+    ) in rows:
+        if form not in RESEARCH_FORMS:
+            continue
+
+        filings.append(
+            Filing(
+                symbol=ticker.upper(),
+                cik=cik,
+                accession_number=accession_number,
+                form=form,
+                filed_at=date.fromisoformat(filed_at),
+                available_at=parse_sec_datetime(available_at),
+                primary_document=primary_document,
+            )
+        )
+
+    return filings

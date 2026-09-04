@@ -8,6 +8,7 @@ with workflow.unsafe.imports_passed_through():
         answer_question,
         fetch_market_events,
         plan_research,
+        prepare_sec_corpus_activity,
         retrieve_evidence,
         synthesize_recommendation,
     )
@@ -83,6 +84,17 @@ class FundamentalAnalysisWorkflow:
         run: ResearchRun,
     ) -> FundamentalAnalysis:
         symbol = run.scope.attributes["symbol"]
+
+        await workflow.execute_activity(
+            prepare_sec_corpus_activity,
+            args=[
+                symbol,
+                run.as_of - timedelta(days=3650),
+                run.as_of,
+                run.as_of - timedelta(days=730),
+            ],
+            start_to_close_timeout=timedelta(minutes=5),
+        )
 
         return await self.analyst.analyze(
             symbol=symbol,

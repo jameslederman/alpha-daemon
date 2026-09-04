@@ -15,15 +15,15 @@ BARE_ITEM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+SEC_CHUNKING_VERSION = "sec-v1"
+
 SEC_SECTION_PATTERN = re.compile(
-    r"^(?:"
-    r"PART\s+[IVX]+"
-    r"|"
-    r"ITEM\s+\d+[A-Z]?(?:\.\d+)?\.?(?:\s+.*)?"
-    r")$",
+    r"^(?:" r"PART\s+[IVX]+" r"|" r"ITEM\s+\d+[A-Z]?(?:\.\d+)?\.?(?:\s+.*)?" r")$",
     re.IGNORECASE,
 )
 
+EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
+EMBEDDING_DIMENSIONS = 512
 RERANKER_MODEL_ID = "cross-encoder/ms-marco-MiniLM-L6-v2"
 
 
@@ -125,6 +125,7 @@ def chunk_sec_event(
             chunk_id = (
                 f"{event.source}:"
                 f"{event.source_id}:"
+                f"{SEC_CHUNKING_VERSION}:"
                 f"section:{section_index}:"
                 f"chunk:{chunk_index}"
             )
@@ -240,7 +241,7 @@ def get_bedrock_runtime():
 
 def embed_text(
     text: str,
-    model_id: str = "amazon.titan-embed-text-v2:0",
+    model_id: str = EMBEDDING_MODEL_ID,
 ) -> list[float]:
     client = get_bedrock_runtime()
 
@@ -249,7 +250,7 @@ def embed_text(
         body=json.dumps(
             {
                 "inputText": text,
-                "dimensions": 512,
+                "dimensions": EMBEDDING_DIMENSIONS,
                 "normalize": True,
             }
         ),

@@ -3,7 +3,11 @@ import os
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from edgar import NoRelevantFilingsError, get_latest_filing_event
+from edgar import (
+    Filing,
+    NoRelevantFilingsError,
+    get_latest_filing_event,
+)
 from llm import BedrockLLMClient
 from massive import MassiveMarketDataProvider
 from models import (
@@ -31,7 +35,12 @@ from retrieval import (
 )
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
-from tools import get_price_history, search_company_news, search_sec_filings
+from tools import (
+    get_price_history,
+    prepare_sec_corpus,
+    search_company_news,
+    search_sec_filings,
+)
 
 
 @activity.defn
@@ -225,6 +234,22 @@ Recent events:
         raise ValueError("Research question priorities must be unique")
 
     return sorted(questions, key=lambda q: q.priority)
+
+
+@activity.defn(name="prepare_sec_corpus")
+async def prepare_sec_corpus_activity(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+    materialize_start: datetime | None = None,
+) -> list[Filing]:
+    return await prepare_sec_corpus(
+        symbol=symbol,
+        start=start,
+        end=end,
+        materialize_start=materialize_start,
+        user_agent=os.environ["SEC_USER_AGENT"],
+    )
 
 
 @activity.defn
@@ -505,7 +530,6 @@ async def search_sec_filings_activity(
 
     return await search_sec_filings(
         args=args,
-        user_agent=os.environ["SEC_USER_AGENT"],
     )
 
 
