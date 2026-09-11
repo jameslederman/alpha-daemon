@@ -143,6 +143,15 @@ class ResearchScope(BaseModel):
     attributes: dict[str, str] = Field(default_factory=dict)
 
 
+class ResearchTask(BaseModel):
+    task_id: str
+    skill: str
+    objective: str
+    scope: ResearchScope
+    as_of: datetime
+    depends_on: list[str] = Field(default_factory=list)
+
+
 class SearchCompanyNewsArgs(BaseModel):
     symbol: str
     start: datetime
