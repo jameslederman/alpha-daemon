@@ -13,12 +13,14 @@ with workflow.unsafe.imports_passed_through():
         save_completed_research_run_activity,
         synthesize_recommendation,
     )
-    from fundamental_analyst import FundamentalAnalyst
     from models import (
         FundamentalAnalysis,
         Recommendation,
         ResearchRun,
+        ResearchTask,
     )
+    from research_agent import ResearchAgent
+    from research_skills import get_research_skill
 
 
 @workflow.defn
@@ -59,11 +61,6 @@ class ResearchWorkflow:
             "Research findings: %s",
             [finding.model_dump() for finding in findings],
         )
-        # recommendation = await workflow.execute_activity(
-        #     "analyze_events",
-        #     args=[evidence_chunks, questions],
-        #     start_to_close_timeout=timedelta(seconds=60),
-        # )
 
         recommendation = await workflow.execute_activity(
             synthesize_recommendation,
@@ -75,9 +72,23 @@ class ResearchWorkflow:
 
 
 @workflow.defn
+class ResearchTaskWorkflow:
+    """Execute one skill-scoped research task using the generic research runtime."""
+
+    @workflow.run
+    async def run(
+        self,
+        task: ResearchTask,
+    ) -> dict:
+        skill = get_research_skill(task.skill)
+        agent = ResearchAgent(skill)
+        result = await agent.research(task)
+        return result.model_dump(mode="json")
+
+
+@workflow.defn
 class FundamentalAnalysisWorkflow:
-    def __init__(self) -> None:
-        self.analyst = FundamentalAnalyst()
+    """Built-in fundamental-analysis workflow backed by the generic research agent."""
 
     @workflow.run
     async def run(
@@ -85,6 +96,7 @@ class FundamentalAnalysisWorkflow:
         run: ResearchRun,
     ) -> FundamentalAnalysis:
         symbol = run.scope.attributes["symbol"]
+        skill = get_research_skill("fundamental_analysis")
 
         await workflow.execute_activity(
             prepare_sec_corpus_activity,
@@ -97,10 +109,20 @@ class FundamentalAnalysisWorkflow:
             start_to_close_timeout=timedelta(minutes=5),
         )
 
-        result = await self.analyst.analyze(
-            symbol=symbol,
+        task = ResearchTask(
+            task_id=f"{run.run_id}:fundamental_analysis",
+            skill=skill.name,
+            objective=skill.build_default_objective(run.scope),
+            scope=run.scope,
             as_of=run.as_of,
         )
+
+        result = await ResearchAgent(skill).research(task)
+
+        if not isinstance(result, FundamentalAnalysis):
+            raise TypeError(
+                "fundamental_analysis skill returned an unexpected output type"
+            )
 
         await workflow.execute_activity(
             save_completed_research_run_activity,
