@@ -5,6 +5,7 @@ from temporalio.contrib.strands import TemporalAgent
 
 from models import (
     ResearchPlan,
+    ResearchPlanDraft,
     ResearchQuery,
     ResearchSynthesis,
     ResearchTask,
@@ -27,10 +28,8 @@ Rules:
 - Use multiple tasks only when the objective genuinely spans multiple domains.
 - Do not perform the research yourself.
 - Do not invent tools or skills.
-- Keep depends_on empty; task dependency scheduling is reserved for a later
-  orchestration layer.
-- Copy the supplied scope and as_of into each task. Infrastructure will validate
-  them before execution.
+- For each task, specify only the skill and the focused research objective.
+- Infrastructure owns task IDs, scope, point-in-time boundaries, and execution.
 """
 
 
@@ -56,7 +55,7 @@ class ResearchPlanner:
             model="nova-pro",
             system_prompt=PLANNER_SYSTEM_PROMPT,
             start_to_close_timeout=timedelta(seconds=60),
-            structured_output_model=ResearchPlan,
+            structured_output_model=ResearchPlanDraft,
             tools=[],
         )
 
@@ -80,29 +79,29 @@ Original research objective:
 Registered skills:
 {json.dumps(skills, indent=2)}
 
-Create a ResearchPlan that decomposes the objective into the minimum useful set
-of specialist tasks.
+Create a minimal ResearchPlanDraft containing the specialist tasks needed to
+answer the objective.
 """
 
         result = await self.agent.invoke_async(prompt)
-        plan = result.structured_output
+        draft = result.structured_output
 
-        if not isinstance(plan, ResearchPlan):
+        if not isinstance(draft, ResearchPlanDraft):
             raise TypeError("Research planner returned an unexpected output type")
 
-        if not plan.tasks:
+        if not draft.tasks:
             raise ValueError("Research planner returned no tasks")
 
-        normalized_tasks: list[ResearchTask] = []
-        for index, task in enumerate(plan.tasks, start=1):
-            get_research_skill(task.skill)
-            normalized_tasks.append(
+        tasks: list[ResearchTask] = []
+        for index, planned_task in enumerate(draft.tasks, start=1):
+            get_research_skill(planned_task.skill)
+            tasks.append(
                 ResearchTask(
                     task_id=(
-                        f"{query.query_id}:task:{index}:{task.skill}"
+                        f"{query.query_id}:task:{index}:{planned_task.skill}"
                     ),
-                    skill=task.skill,
-                    objective=task.objective,
+                    skill=planned_task.skill,
+                    objective=planned_task.objective,
                     scope=query.scope,
                     as_of=query.as_of,
                     depends_on=[],
@@ -111,7 +110,7 @@ of specialist tasks.
 
         return ResearchPlan(
             objective=query.objective,
-            tasks=normalized_tasks,
+            tasks=tasks,
         )
 
 
