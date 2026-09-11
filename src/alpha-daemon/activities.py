@@ -23,6 +23,7 @@ from models import (
     ResearchRun,
     SearchCompanyNewsArgs,
     SearchSecFilingsArgs,
+    SecSearchResult,
 )
 from retrieval import (
     chunk_sec_event,
@@ -33,6 +34,7 @@ from retrieval import (
     retrieve_chunks_hybrid,
     retrieve_chunks_semantic,
 )
+from storage import save_completed_research_run
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from tools import (
@@ -517,7 +519,7 @@ async def search_sec_filings_activity(
     start: str,
     end: str,
     limit: int = 5,
-) -> list[EvidenceMatch]:
+) -> SecSearchResult:
     """Search SEC filings for evidence relevant to a fundamental research question."""
 
     args = SearchSecFilingsArgs(
@@ -528,8 +530,23 @@ async def search_sec_filings_activity(
         limit=limit,
     )
 
-    return await search_sec_filings(
-        args=args,
+    return await search_sec_filings(args=args)
+
+
+@activity.defn(name="save_completed_research_run")
+async def save_completed_research_run_activity(
+    run_id: str,
+    symbol: str,
+    as_of: datetime,
+    created_at: datetime,
+    result: dict,
+) -> None:
+    await save_completed_research_run(
+        run_id=run_id,
+        symbol=symbol,
+        as_of=as_of,
+        created_at=created_at,
+        result=result,
     )
 
 

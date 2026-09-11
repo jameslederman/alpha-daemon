@@ -156,3 +156,9 @@ class SearchSecFilingsArgs(BaseModel):
     start: datetime
     end: datetime
     limit: int = 50
+
+
+class SecSearchResult(BaseModel):
+    matches: list[EvidenceMatch] = Field(default_factory=list)
+    coverage_complete: bool = True
+    message: str | None = None

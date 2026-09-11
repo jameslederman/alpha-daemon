@@ -6,6 +6,7 @@ from datetime import datetime
 from models import EvidenceChunk, Filing
 from pgvector.psycopg import register_vector_async
 from psycopg import AsyncConnection
+from psycopg.types.json import Jsonb
 
 CHUNK_EMBEDDINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS chunk_embeddings (
@@ -31,6 +32,19 @@ CREATE TABLE IF NOT EXISTS evidence_chunks (
     text TEXT NOT NULL,
     chunking_version TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
+RESEARCH_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS research_runs (
+    run_id TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    status TEXT NOT NULL,
+    result JSONB,
+    error TEXT
 );
 """
 
@@ -106,11 +120,12 @@ async def chunk_embedding_lock(
 
 async def initialize_storage() -> None:
     async with await AsyncConnection.connect(os.environ["DATABASE_URL"]) as connection:
-        await connection.execute(VECTOR_EXTENSION_SCHEMA)
+        await connection.execute(CHUNK_EMBEDDINGS_SCHEMA)
+        await connection.execute(EVIDENCE_CHUNKS_SCHEMA)
+        await connection.execute(RESEARCH_RUNS_SCHEMA)
         await connection.execute(SEC_FILING_INVENTORY_SCHEMA)
         await connection.execute(SEC_FILINGS_SCHEMA)
-        await connection.execute(EVIDENCE_CHUNKS_SCHEMA)
-        await connection.execute(CHUNK_EMBEDDINGS_SCHEMA)
+        await connection.execute(VECTOR_EXTENSION_SCHEMA)
 
 
 async def get_cached_sec_chunks_between(
@@ -414,6 +429,44 @@ async def get_cached_sec_filing(
     return row[0], row[1]
 
 
+async def save_completed_research_run(
+    run_id: str,
+    symbol: str,
+    as_of: datetime,
+    created_at: datetime,
+    result: dict,
+) -> None:
+    async with await AsyncConnection.connect(os.environ["DATABASE_URL"]) as connection:
+        await connection.execute(
+            """
+            INSERT INTO research_runs (
+                run_id,
+                symbol,
+                as_of,
+                created_at,
+                completed_at,
+                status,
+                result,
+                error
+            )
+            VALUES (%s, %s, %s, %s, NOW(), 'completed', %s, NULL)
+            ON CONFLICT (run_id)
+            DO UPDATE SET
+                completed_at = NOW(),
+                status = 'completed',
+                result = EXCLUDED.result,
+                error = NULL
+            """,
+            (
+                run_id,
+                symbol.upper(),
+                as_of,
+                created_at,
+                Jsonb(result),
+            ),
+        )
+
+
 @asynccontextmanager
 async def sec_chunk_lock(
     accession_number: str,
@@ -445,6 +498,31 @@ async def sec_chunk_lock(
                 hashtextextended(%s, 0)
             )
             """,
+            (lock_key,),
+        )
+        await connection.close()
+
+
+@asynccontextmanager
+async def sec_corpus_lock(
+    symbol: str,
+) -> AsyncGenerator[None, None]:
+    connection = await AsyncConnection.connect(
+        os.environ["DATABASE_URL"],
+        autocommit=True,
+    )
+
+    lock_key = f"sec_corpus:{symbol.upper()}"
+
+    try:
+        await connection.execute(
+            "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+            (lock_key,),
+        )
+        yield
+    finally:
+        await connection.execute(
+            "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
             (lock_key,),
         )
         await connection.close()

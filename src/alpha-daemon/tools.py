@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 import numpy as np
@@ -16,6 +17,7 @@ from models import (
     NewsArticle,
     SearchCompanyNewsArgs,
     SearchSecFilingsArgs,
+    SecSearchResult,
 )
 from retrieval import (
     EMBEDDING_MODEL_ID,
@@ -33,6 +35,7 @@ from storage import (
     get_cached_sec_chunks_between,
     get_unmaterialized_sec_accessions_between,
     sec_chunk_lock,
+    sec_corpus_lock,
     upsert_chunk_embeddings,
     upsert_evidence_chunks,
     upsert_sec_filing_inventory,
@@ -167,7 +170,7 @@ async def search_company_news(
 
 async def search_sec_filings(
     args: SearchSecFilingsArgs,
-) -> list[EvidenceMatch]:
+) -> SecSearchResult:
     unmaterialized_accessions = await get_unmaterialized_sec_accessions_between(
         symbol=args.symbol,
         start=args.start,
@@ -175,11 +178,49 @@ async def search_sec_filings(
         chunking_version=SEC_CHUNKING_VERSION,
     )
 
+    expansion_error: str | None = None
+
     if unmaterialized_accessions:
-        raise RuntimeError(
-            "Requested SEC range is not fully materialized: "
-            f"{len(unmaterialized_accessions)} filings are missing from local"
+        async with sec_corpus_lock(args.symbol):
+            unmaterialized_accessions = await get_unmaterialized_sec_accessions_between(
+                symbol=args.symbol,
+                start=args.start,
+                end=args.end,
+                chunking_version=SEC_CHUNKING_VERSION,
+            )
+
+            if unmaterialized_accessions:
+                try:
+                    await prepare_sec_corpus(
+                        symbol=args.symbol,
+                        start=args.start,
+                        end=args.end,
+                        materialize_start=args.start,
+                        user_agent=os.environ["SEC_USER_AGENT"],
+                    )
+                except Exception as exc:
+                    expansion_error = str(exc)
+
+    remaining_unmaterialized = await get_unmaterialized_sec_accessions_between(
+        symbol=args.symbol,
+        start=args.start,
+        end=args.end,
+        chunking_version=SEC_CHUNKING_VERSION,
+    )
+
+    coverage_complete = not remaining_unmaterialized
+
+    coverage_message = None
+
+    if not coverage_complete:
+        coverage_message = (
+            f"Requested SEC range {args.start.isoformat()} through "
+            f"{args.end.isoformat()} is only partially available. "
+            f"{len(remaining_unmaterialized)} known filings are not materialized."
         )
+
+        if expansion_error:
+            coverage_message += f" SEC corpus expansion failed: {expansion_error}"
 
     chunks = await get_cached_sec_chunks_between(
         symbol=args.symbol,
@@ -189,7 +230,11 @@ async def search_sec_filings(
     )
 
     if not chunks:
-        return []
+        return SecSearchResult(
+            matches=[],
+            coverage_complete=coverage_complete,
+            message=coverage_message,
+        )
 
     chunk_ids = [chunk.chunk_id for chunk in chunks]
 
@@ -258,4 +303,8 @@ async def search_sec_filings(
             )
         )
 
-    return matches
+    return SecSearchResult(
+        matches=matches,
+        coverage_complete=coverage_complete,
+        message=coverage_message,
+    )

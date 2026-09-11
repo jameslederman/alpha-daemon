@@ -10,6 +10,7 @@ with workflow.unsafe.imports_passed_through():
         plan_research,
         prepare_sec_corpus_activity,
         retrieve_evidence,
+        save_completed_research_run_activity,
         synthesize_recommendation,
     )
     from fundamental_analyst import FundamentalAnalyst
@@ -96,7 +97,21 @@ class FundamentalAnalysisWorkflow:
             start_to_close_timeout=timedelta(minutes=5),
         )
 
-        return await self.analyst.analyze(
+        result = await self.analyst.analyze(
             symbol=symbol,
             as_of=run.as_of,
         )
+
+        await workflow.execute_activity(
+            save_completed_research_run_activity,
+            args=[
+                run.run_id,
+                symbol,
+                run.as_of,
+                run.created_at,
+                result.model_dump(mode="json"),
+            ],
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+
+        return result
