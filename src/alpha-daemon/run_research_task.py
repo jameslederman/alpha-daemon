@@ -3,11 +3,13 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from temporalio import workflow
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
 
-from models import ResearchScope, ResearchTask
-from workflows import ResearchTaskWorkflow
+with workflow.unsafe.imports_passed_through():
+    from models import ResearchScope, ResearchTask
+    from workflows import ResearchTaskWorkflow
 
 
 def parse_as_of(value: str) -> datetime:
