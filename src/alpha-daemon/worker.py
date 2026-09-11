@@ -21,7 +21,11 @@ with workflow.unsafe.imports_passed_through():
         synthesize_recommendation,
     )
     from strands_smoke import StrandsSmokeTestWorkflow
-    from workflows import FundamentalAnalysisWorkflow, ResearchWorkflow
+    from workflows import (
+        FundamentalAnalysisWorkflow,
+        ResearchTaskWorkflow,
+        ResearchWorkflow,
+    )
 
 
 async def main():
@@ -45,6 +49,7 @@ async def main():
         task_queue="my-task-queue",
         workflows=[
             FundamentalAnalysisWorkflow,
+            ResearchTaskWorkflow,
             ResearchWorkflow,
             StrandsSmokeTestWorkflow,
         ],
