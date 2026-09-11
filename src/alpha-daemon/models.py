@@ -143,6 +143,15 @@ class ResearchScope(BaseModel):
     attributes: dict[str, str] = Field(default_factory=dict)
 
 
+class PlannedResearchTask(BaseModel):
+    skill: str
+    objective: str
+
+
+class ResearchPlanDraft(BaseModel):
+    tasks: list[PlannedResearchTask] = Field(default_factory=list)
+
+
 class ResearchTask(BaseModel):
     task_id: str
     skill: str
