@@ -16,10 +16,14 @@ with workflow.unsafe.imports_passed_through():
     from models import (
         FundamentalAnalysis,
         Recommendation,
+        ResearchQuery,
         ResearchRun,
+        ResearchSynthesis,
         ResearchTask,
+        ResearchTaskResult,
     )
     from research_agent import ResearchAgent
+    from research_orchestrator import ResearchPlanner, ResearchSynthesizer
     from research_skills import get_research_skill
 
 
@@ -84,6 +88,45 @@ class ResearchTaskWorkflow:
         agent = ResearchAgent(skill)
         result = await agent.research(task)
         return result.model_dump(mode="json")
+
+
+@workflow.defn
+class ResearchOrchestratorWorkflow:
+    """Plan, execute, and synthesize a user- or agent-generated research query."""
+
+    def __init__(self) -> None:
+        self.planner = ResearchPlanner()
+        self.synthesizer = ResearchSynthesizer()
+
+    @workflow.run
+    async def run(
+        self,
+        query: ResearchQuery,
+    ) -> ResearchSynthesis:
+        plan = await self.planner.plan(query)
+
+        handles = [
+            workflow.start_child_workflow(
+                ResearchTaskWorkflow.run,
+                task,
+                id=task.task_id,
+            )
+            for task in plan.tasks
+        ]
+        outputs = await asyncio.gather(*handles)
+
+        task_results = [
+            ResearchTaskResult(
+                task=task,
+                result=output,
+            )
+            for task, output in zip(plan.tasks, outputs, strict=True)
+        ]
+
+        return await self.synthesizer.synthesize(
+            query=query,
+            results=task_results,
+        )
 
 
 @workflow.defn
