@@ -105,15 +105,16 @@ class ResearchOrchestratorWorkflow:
     ) -> ResearchSynthesis:
         plan = await self.planner.plan(query)
 
-        handles = [
-            workflow.start_child_workflow(
-                ResearchTaskWorkflow.run,
-                task,
-                id=task.task_id,
-            )
-            for task in plan.tasks
-        ]
-        outputs = await asyncio.gather(*handles)
+        outputs = await asyncio.gather(
+            *[
+                workflow.execute_child_workflow(
+                    ResearchTaskWorkflow.run,
+                    task,
+                    id=task.task_id,
+                )
+                for task in plan.tasks
+            ]
+        )
 
         task_results = [
             ResearchTaskResult(
