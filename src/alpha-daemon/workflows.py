@@ -13,12 +13,18 @@ with workflow.unsafe.imports_passed_through():
         save_completed_research_run_activity,
         synthesize_recommendation,
     )
-    from fundamental_analyst import FundamentalAnalyst
     from models import (
         FundamentalAnalysis,
         Recommendation,
+        ResearchQuery,
         ResearchRun,
+        ResearchSynthesis,
+        ResearchTask,
+        ResearchTaskResult,
     )
+    from research_agent import ResearchAgent
+    from research_orchestrator import ResearchPlanner, ResearchSynthesizer
+    from research_skills import get_research_skill
 
 
 @workflow.defn
@@ -59,11 +65,6 @@ class ResearchWorkflow:
             "Research findings: %s",
             [finding.model_dump() for finding in findings],
         )
-        # recommendation = await workflow.execute_activity(
-        #     "analyze_events",
-        #     args=[evidence_chunks, questions],
-        #     start_to_close_timeout=timedelta(seconds=60),
-        # )
 
         recommendation = await workflow.execute_activity(
             synthesize_recommendation,
@@ -75,9 +76,63 @@ class ResearchWorkflow:
 
 
 @workflow.defn
-class FundamentalAnalysisWorkflow:
+class ResearchTaskWorkflow:
+    """Execute one skill-scoped research task using the generic research runtime."""
+
+    @workflow.run
+    async def run(
+        self,
+        task: ResearchTask,
+    ) -> dict:
+        skill = get_research_skill(task.skill)
+        agent = ResearchAgent(skill)
+        result = await agent.research(task)
+        return result.model_dump(mode="json")
+
+
+@workflow.defn
+class ResearchOrchestratorWorkflow:
+    """Plan, execute, and synthesize a user- or agent-generated research query."""
+
     def __init__(self) -> None:
-        self.analyst = FundamentalAnalyst()
+        self.planner = ResearchPlanner()
+        self.synthesizer = ResearchSynthesizer()
+
+    @workflow.run
+    async def run(
+        self,
+        query: ResearchQuery,
+    ) -> ResearchSynthesis:
+        plan = await self.planner.plan(query)
+
+        outputs = await asyncio.gather(
+            *[
+                workflow.execute_child_workflow(
+                    ResearchTaskWorkflow.run,
+                    task,
+                    id=task.task_id,
+                )
+                for task in plan.tasks
+            ]
+        )
+
+        task_results = [
+            ResearchTaskResult(
+                task=task,
+                result=output,
+            )
+            for task, output in zip(plan.tasks, outputs, strict=True)
+        ]
+
+        return await self.synthesizer.synthesize(
+            query=query,
+            results=task_results,
+        )
+
+
+@workflow.defn
+class FundamentalAnalysisWorkflow:
+    """Built-in fundamental-analysis workflow backed by the generic research agent."""
 
     @workflow.run
     async def run(
@@ -85,6 +140,7 @@ class FundamentalAnalysisWorkflow:
         run: ResearchRun,
     ) -> FundamentalAnalysis:
         symbol = run.scope.attributes["symbol"]
+        skill = get_research_skill("fundamental_analysis")
 
         await workflow.execute_activity(
             prepare_sec_corpus_activity,
@@ -97,10 +153,20 @@ class FundamentalAnalysisWorkflow:
             start_to_close_timeout=timedelta(minutes=5),
         )
 
-        result = await self.analyst.analyze(
-            symbol=symbol,
+        task = ResearchTask(
+            task_id=f"{run.run_id}:fundamental_analysis",
+            skill=skill.name,
+            objective=skill.build_default_objective(run.scope),
+            scope=run.scope,
             as_of=run.as_of,
         )
+
+        result = await ResearchAgent(skill).research(task)
+
+        if not isinstance(result, FundamentalAnalysis):
+            raise TypeError(
+                "fundamental_analysis skill returned an unexpected output type"
+            )
 
         await workflow.execute_activity(
             save_completed_research_run_activity,

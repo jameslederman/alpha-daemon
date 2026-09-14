@@ -143,6 +143,50 @@ class ResearchScope(BaseModel):
     attributes: dict[str, str] = Field(default_factory=dict)
 
 
+class PlannedResearchTask(BaseModel):
+    skill: str
+    objective: str
+
+
+class ResearchPlanDraft(BaseModel):
+    tasks: list[PlannedResearchTask] = Field(default_factory=list)
+
+
+class ResearchTask(BaseModel):
+    task_id: str
+    skill: str
+    objective: str
+    scope: ResearchScope
+    as_of: datetime
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class ResearchPlan(BaseModel):
+    objective: str
+    tasks: list[ResearchTask] = Field(default_factory=list)
+
+
+class ResearchQuery(BaseModel):
+    query_id: str
+    objective: str
+    scope: ResearchScope
+    as_of: datetime
+    created_at: datetime
+
+
+class ResearchTaskResult(BaseModel):
+    task: ResearchTask
+    result: dict
+
+
+class ResearchSynthesis(BaseModel):
+    query_id: str
+    summary: str
+    conclusions: list[str] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    confidence: float
+
+
 class SearchCompanyNewsArgs(BaseModel):
     symbol: str
     start: datetime
