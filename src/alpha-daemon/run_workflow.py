@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from temporalio import workflow
-from temporalio.client import Client
-from temporalio.contrib.pydantic import pydantic_data_converter
+
+from temporal_runtime import connect_temporal_client, temporal_task_queue
 
 with workflow.unsafe.imports_passed_through():
     from models import ResearchRun, ResearchScope
@@ -77,10 +77,8 @@ async def main():
         as_of=args.as_of,
     )
 
-    # Connect client to the local temporal server
-    client = await Client.connect(
-        "localhost:7233",
-        data_converter=pydantic_data_converter,
+    client = await connect_temporal_client(
+        use_pydantic_data_converter=True,
     )
 
     # Execute the workflow
@@ -88,7 +86,7 @@ async def main():
         ResearchWorkflow.run,
         run,
         id=run.run_id,
-        task_queue="my-task-queue",
+        task_queue=temporal_task_queue(),
     )
 
     print(f"Workflow result: {result}")
