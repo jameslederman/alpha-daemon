@@ -55,7 +55,7 @@ def require_api_key(
 ) -> None:
     expected = os.getenv("ALPHA_DAEMON_API_KEY")
 
-    if expected is None:
+    if not expected:
         return
 
     if api_key is None or not hmac.compare_digest(api_key, expected):
