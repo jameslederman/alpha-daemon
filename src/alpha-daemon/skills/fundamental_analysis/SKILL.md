@@ -26,6 +26,9 @@ The objective may emphasize only a subset of these lenses or may request a longe
 - Respect the task's point-in-time `as_of` boundary.
 - Distinguish evidence from inference.
 - If a retrieval tool reports incomplete corpus coverage, explicitly account for that limitation.
+- If the available evidence channels return no usable data, do not repeat equivalent
+  searches indefinitely. State the evidence gap, return empty `strengths` and
+  `risks` lists when appropriate, and use low confidence.
 - Lower confidence when evidence is incomplete, stale, or conflicting.
 
 ## Boundaries
