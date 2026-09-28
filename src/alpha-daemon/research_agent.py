@@ -30,6 +30,14 @@ Rules:
 """
 
 
+class ResearchAgentConfigurationError(ValueError):
+    """Research task and configured skill are inconsistent."""
+
+
+class ResearchAgentOutputError(TypeError):
+    """Research agent returned an output that violates the skill contract."""
+
+
 class ResearchAgent:
     """Generic Temporal-backed research runtime configured by a ResearchSkill."""
 
@@ -60,7 +68,7 @@ class ResearchAgent:
 
     async def research(self, task: ResearchTask) -> BaseModel:
         if task.skill != self.skill.name:
-            raise ValueError(
+            raise ResearchAgentConfigurationError(
                 f"ResearchTask skill {task.skill!r} does not match configured "
                 f"ResearchAgent skill {self.skill.name!r}"
             )
@@ -87,7 +95,7 @@ output required by the active skill.
         output = result.structured_output
 
         if not isinstance(output, self.skill.output_model):
-            raise TypeError(
+            raise ResearchAgentOutputError(
                 "Research agent returned an unexpected structured output type: "
                 f"expected {self.skill.output_model.__name__}, "
                 f"got {type(output).__name__}"
