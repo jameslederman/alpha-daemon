@@ -18,6 +18,7 @@ from models import FundamentalAnalysis, ResearchScope
 class ResearchToolSpec:
     activity: Callable[..., Any]
     start_to_close_timeout: timedelta
+    point_in_time_end_field: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,14 +80,17 @@ FUNDAMENTAL_ANALYSIS_SKILL = ResearchSkill(
         ResearchToolSpec(
             activity=get_price_history_activity,
             start_to_close_timeout=timedelta(seconds=30),
+            point_in_time_end_field="end",
         ),
         ResearchToolSpec(
             activity=search_company_news_activity,
             start_to_close_timeout=timedelta(seconds=30),
+            point_in_time_end_field="end",
         ),
         ResearchToolSpec(
             activity=search_sec_filings_activity,
             start_to_close_timeout=timedelta(minutes=15),
+            point_in_time_end_field="end",
         ),
     ),
     default_objective_template=(
