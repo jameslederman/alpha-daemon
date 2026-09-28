@@ -79,8 +79,9 @@ ResearchSynthesis
 ```
 
 The planner can choose only registered skills. It does not create executable workflow
-code, choose arbitrary tools, or control point-in-time scope. Temporal owns execution
-of the validated plan.
+code or choose arbitrary tools. Research agents may expand across relevant securities,
+while infrastructure clamps point-in-time tool boundaries to each task's `as_of`.
+Temporal owns execution of the validated plan.
 
 The existing `FundamentalAnalysisWorkflow` remains as a built-in entry point. It
 prepares the SEC working corpus and then invokes the same generic
