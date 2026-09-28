@@ -129,7 +129,8 @@ answer the objective.
                 )
 
             try:
-                get_research_skill(skill_name)
+                skill = get_research_skill(skill_name)
+                skill.validate_scope(query.scope)
             except ValueError as exc:
                 raise ResearchPlanValidationError(str(exc)) from exc
 
