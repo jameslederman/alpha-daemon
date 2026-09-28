@@ -3,7 +3,6 @@ import logging
 
 from strands.models import BedrockModel
 from temporalio import workflow
-from temporalio.client import Client
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.worker import Worker
 
@@ -20,7 +19,9 @@ with workflow.unsafe.imports_passed_through():
         search_sec_filings_activity,
         synthesize_recommendation,
     )
+    from storage import initialize_storage
     from strands_smoke import StrandsSmokeTestWorkflow
+    from temporal_runtime import connect_temporal_client, temporal_task_queue
     from workflows import (
         FundamentalAnalysisWorkflow,
         ResearchOrchestratorWorkflow,
@@ -38,8 +39,9 @@ async def main():
         }
     )
 
-    client = await Client.connect(
-        "localhost:7233",
+    await initialize_storage()
+
+    client = await connect_temporal_client(
         plugins=[plugin],
     )
 
@@ -47,7 +49,7 @@ async def main():
 
     worker = Worker(
         client,
-        task_queue="my-task-queue",
+        task_queue=temporal_task_queue(),
         workflows=[
             FundamentalAnalysisWorkflow,
             ResearchOrchestratorWorkflow,
