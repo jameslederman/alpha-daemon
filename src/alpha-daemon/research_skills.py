@@ -28,9 +28,17 @@ class ResearchSkill:
     output_model: type[BaseModel]
     tools: tuple[ResearchToolSpec, ...]
     default_objective_template: str
+    allowed_scope_kinds: tuple[str, ...] = ()
     required_scope_attributes: tuple[str, ...] = ()
 
     def validate_scope(self, scope: ResearchScope) -> None:
+        if self.allowed_scope_kinds and scope.kind not in self.allowed_scope_kinds:
+            allowed = ", ".join(self.allowed_scope_kinds)
+            raise ValueError(
+                f"Research skill {self.name!r} does not support scope kind "
+                f"{scope.kind!r}. Allowed scope kinds: {allowed}"
+            )
+
         for attribute in self.required_scope_attributes:
             value = scope.attributes.get(attribute)
             if value is None or not value.strip():
@@ -80,6 +88,7 @@ FUNDAMENTAL_ANALYSIS_SKILL = ResearchSkill(
         "company-specific developments, and risks that could affect future "
         "fundamentals."
     ),
+    allowed_scope_kinds=("security",),
     required_scope_attributes=("symbol",),
 )
 
