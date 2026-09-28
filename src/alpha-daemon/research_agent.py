@@ -2,14 +2,12 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, cast
 
+from models import ResearchTask
 from pydantic import BaseModel
+from research_skills import ResearchSkill, ResearchToolSpec
 from strands.types.tools import AgentTool, ToolGenerator, ToolUse
 from temporalio.contrib.strands import TemporalAgent
 from temporalio.contrib.strands.workflow import activity_as_tool
-
-from models import ResearchTask
-from research_skills import ResearchSkill, ResearchToolSpec
-
 
 BASE_RESEARCH_SYSTEM_PROMPT = """
 You are an evidence-grounded research agent operating inside AlphaDaemon.

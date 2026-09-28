@@ -4,14 +4,13 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
-
 from activities import (
     get_price_history_activity,
     search_company_news_activity,
     search_sec_filings_activity,
 )
 from models import FundamentalAnalysis, ResearchScope
+from pydantic import BaseModel
 
 
 @dataclass(frozen=True)

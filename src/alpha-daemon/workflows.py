@@ -57,8 +57,8 @@ with workflow.unsafe.imports_passed_through():
     from research_orchestrator import (
         ResearchPlanner,
         ResearchPlanValidationError,
-        ResearchSynthesizer,
         ResearchSynthesisValidationError,
+        ResearchSynthesizer,
     )
     from research_skills import get_research_skill
 

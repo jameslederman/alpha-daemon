@@ -1,8 +1,6 @@
 import json
 from datetime import timedelta
 
-from temporalio.contrib.strands import TemporalAgent
-
 from models import (
     ResearchPlan,
     ResearchPlanDraft,
@@ -13,7 +11,7 @@ from models import (
     ResearchTaskResult,
 )
 from research_skills import get_research_skill, list_research_skills
-
+from temporalio.contrib.strands import TemporalAgent
 
 MAX_RESEARCH_TASKS = 6
 
