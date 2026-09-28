@@ -1,0 +1,10 @@
+temporalio[strands-agents,pydantic]==1.31.0
+strands-agents==1.53.0
+boto3
+httpx
+beautifulsoup4
+numpy
+scikit-learn
+sentence-transformers
+psycopg[binary]
+pgvector
