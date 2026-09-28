@@ -15,7 +15,10 @@ from models import (
 from research_skills import get_research_skill, list_research_skills
 
 
-PLANNER_SYSTEM_PROMPT = """
+MAX_RESEARCH_TASKS = 6
+
+
+PLANNER_SYSTEM_PROMPT = f"""
 You are AlphaDaemon's research planner.
 
 Your job is to decompose a research objective into the smallest useful set of
@@ -27,14 +30,12 @@ Rules:
 - Create only tasks that materially help answer the objective.
 - Prefer one focused task when one skill is sufficient.
 - Use multiple tasks only when the objective genuinely spans multiple domains.
+- Never create more than {MAX_RESEARCH_TASKS} tasks.
 - Do not perform the research yourself.
 - Do not invent tools or skills.
 - For each task, specify only the skill and the focused research objective.
 - Infrastructure owns task IDs, scope, point-in-time boundaries, and execution.
 """
-
-
-MAX_RESEARCH_TASKS = 6
 
 
 class ResearchPlanValidationError(ValueError):
