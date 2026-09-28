@@ -1,11 +1,8 @@
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field, StringConstraints
-
-
-NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+from pydantic import BaseModel, Field
 
 
 class EvidenceChunk(BaseModel):
@@ -142,13 +139,13 @@ class ResearchRun(BaseModel):
 
 
 class ResearchScope(BaseModel):
-    kind: NonEmptyStr
+    kind: str
     attributes: dict[str, str] = Field(default_factory=dict)
 
 
 class PlannedResearchTask(BaseModel):
-    skill: NonEmptyStr
-    objective: NonEmptyStr
+    skill: str
+    objective: str
 
 
 class ResearchPlanDraft(BaseModel):
@@ -156,22 +153,22 @@ class ResearchPlanDraft(BaseModel):
 
 
 class ResearchTask(BaseModel):
-    task_id: NonEmptyStr
-    skill: NonEmptyStr
-    objective: NonEmptyStr
+    task_id: str
+    skill: str
+    objective: str
     scope: ResearchScope
     as_of: datetime
     depends_on: list[str] = Field(default_factory=list)
 
 
 class ResearchPlan(BaseModel):
-    objective: NonEmptyStr
+    objective: str
     tasks: list[ResearchTask] = Field(default_factory=list)
 
 
 class ResearchQuery(BaseModel):
-    query_id: NonEmptyStr
-    objective: NonEmptyStr
+    query_id: str
+    objective: str
     scope: ResearchScope
     as_of: datetime
     created_at: datetime
