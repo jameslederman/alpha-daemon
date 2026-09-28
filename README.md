@@ -622,6 +622,55 @@ Start the worker:
 PYTHONPATH=src/alpha-daemon python src/alpha-daemon/worker.py
 ```
 
+Start the API in another terminal:
+
+```bash
+PYTHONPATH=src/alpha-daemon uvicorn api:app \
+  --app-dir src/alpha-daemon \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+Start research asynchronously:
+
+```bash
+curl -X POST http://localhost:8000/research \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "AAPL",
+    "objective": "Assess current fundamentals and major risks."
+  }'
+```
+
+The response contains a Temporal workflow ID. Poll it with:
+
+```bash
+curl http://localhost:8000/research/<workflow_id>
+```
+
+If `ALPHA_DAEMON_API_KEY` is configured, include it as
+`X-AlphaDaemon-Key` on research requests.
+
+### Cloud runtime configuration
+
+The API, worker, and command-line clients read Temporal configuration from:
+
+```text
+TEMPORAL_ADDRESS
+TEMPORAL_NAMESPACE
+TEMPORAL_TASK_QUEUE
+TEMPORAL_API_KEY
+TEMPORAL_TLS
+```
+
+Local defaults continue to use `localhost:7233`, namespace `default`, and task
+queue `my-task-queue`.
+
+The worker initializes the PostgreSQL/pgvector schema on startup. For hosted
+PostgreSQL, use a direct database connection rather than a transaction-pooled
+connection because AlphaDaemon currently uses session-level PostgreSQL advisory
+locks while populating the evidence cache.
+
 ---
 
 ## Engineering Themes Demonstrated
