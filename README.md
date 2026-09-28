@@ -6,7 +6,7 @@ AlphaDaemon is an experimental agentic market-intelligence system designed to re
 
 The project is intentionally built as more than an LLM wrapper. Its core engineering focus is on the hard parts of production-grade AI systems: **durable orchestration, data provenance, retrieval quality, persistent memory, point-in-time correctness, tool boundaries, caching, and deterministic/agentic separation of concerns.**
 
-> **Current focus:** company fundamental research using SEC filings, with a persistent local evidence corpus and a Temporal-orchestrated analyst agent.
+> **Current focus:** skill-scoped public-company research with SEC-backed fundamental analysis, a persistent local evidence corpus, and Temporal-orchestrated planning, child workflows, and synthesis.
 
 ---
 
@@ -57,33 +57,35 @@ That longitudinal machine-belief history is a central design goal.
 ## Current Architecture
 
 ```text
-                         ResearchRun
-                             │
-                  deterministic orchestration
-                             │
-             ┌───────────────┴────────────────┐
-             │                                │
-     Fundamental Analyst               Macro Outlook
-       bounded agent                    shared state
-             │                                │
-    required research lenses            FRED / BLS / BEA
-    + dynamic exploration               rates / inflation
-             │                                │
-             └───────────────┬────────────────┘
-                             ↓
-                    Research Findings
-                             ↓
-                   Forecast Assumptions
-                             ↓
-                    Valuation Engine
-                  deterministic Python
-                             ↓
-                bear / base / bull target
-                             ↓
-                    expected return
-                             ↓
-                   BUY / HOLD / SELL
+ResearchQuery
+    ↓
+ResearchPlanner
+    ↓
+bounded ResearchPlan
+    ↓
+Temporal validates and executes the plan
+    ↓
+ResearchTaskWorkflow child workflows
+    ↓
+ResearchAgent + registered ResearchSkill
+    ↓
+bounded domain tools
+    ↓
+typed specialist results
+    ↓
+ResearchSynthesizer
+    ↓
+ResearchSynthesis
 ```
+
+The planner can choose only registered skills. It does not create executable workflow
+code or choose arbitrary tools. Research agents may expand across relevant securities,
+while infrastructure clamps point-in-time tool boundaries to each task's `as_of`.
+Temporal owns execution of the validated plan.
+
+The existing `FundamentalAnalysisWorkflow` remains as a built-in entry point. It
+prepares the SEC working corpus and then invokes the same generic
+`ResearchAgent` with the `fundamental_analysis` skill.
 
 The system separates **what the agent should decide** from **what infrastructure must guarantee**.
 
@@ -115,25 +117,30 @@ This separation keeps the system agentic without making correctness depend on un
 
 AlphaDaemon uses **Temporal** to make agent workflows durable and observable.
 
-The current fundamental-analysis workflow:
+The current research runtime supports two execution paths:
 
-1. prepares the SEC corpus once
-2. launches a bounded analyst agent
-3. allows the agent to issue multiple research queries
-4. serves those queries from the prepared local evidence corpus
-5. returns a structured `FundamentalAnalysis`
+1. a direct `ResearchTaskWorkflow` for a specific registered skill and objective
+2. a `ResearchOrchestratorWorkflow` that plans a query, launches bounded child
+   research workflows, gathers their typed results, and synthesizes a final answer
 
-Temporal provides durable retries, activity isolation, workflow state, and a clean path toward long-running autonomous research processes.
+The built-in `FundamentalAnalysisWorkflow` remains available for the standard
+company-fundamentals path and uses the same generic research runtime underneath.
+
+Temporal provides durable retries, activity isolation, child-workflow execution,
+workflow state, and a clean path toward long-running autonomous research processes.
 
 ---
 
 ### Strands agent integration
 
-The fundamental analyst is implemented with **Strands Agents** and executed through Temporal.
+The generic `ResearchAgent`, research planner, and synthesizer are implemented with
+**Strands Agents** and executed through Temporal.
 
 The model currently uses Amazon Nova Pro through AWS Bedrock.
 
-Agent tools are explicit and bounded. Domain capabilities remain separate from orchestration wrappers:
+Each research skill declares its instructions, structured output type, and allowed
+tool set. Agent tools are explicit and bounded. Domain capabilities remain separate
+from orchestration wrappers:
 
 ```text
 Domain capability
@@ -293,14 +300,15 @@ This gives the system a relatively inexpensive first-stage search followed by a 
 
 Point-in-time correctness is a first-class concern.
 
-Every `ResearchRun` includes an exact timezone-aware `as_of` timestamp.
+Every `ResearchRun`, `ResearchQuery`, and `ResearchTask` carries an exact
+timezone-aware `as_of` timestamp.
 
 SEC filing eligibility is based on the filing's actual availability timestamp, not simply its reporting period.
 
 Conceptually:
 
 ```text
-filing existed before ResearchRun.as_of?
+filing existed before the active as_of boundary?
         ↓
 yes → eligible
 no  → invisible to the run
@@ -321,7 +329,20 @@ The architecture is being designed so that this same point-in-time boundary can 
 
 ## Research Data Model
 
-The broader research architecture is organized around structured research objects rather than free-form prompts:
+The research architecture is organized around structured objects rather than
+unconstrained agent spawning.
+
+The new skill-oriented orchestration path is:
+
+```text
+ResearchQuery
+→ ResearchPlan
+→ ResearchTask[]
+→ ResearchTaskResult[]
+→ ResearchSynthesis
+```
+
+The earlier evidence/recommendation path remains in the codebase:
 
 ```text
 ResearchRun
@@ -331,10 +352,15 @@ ResearchRun
 → Recommendation
 ```
 
-Current and planned models include:
+Current models include:
 
 - `ResearchRun`
 - `ResearchScope`
+- `ResearchQuery`
+- `ResearchPlan`
+- `ResearchTask`
+- `ResearchTaskResult`
+- `ResearchSynthesis`
 - `ResearchQuestion`
 - `EvidenceChunk`
 - `EvidenceMatch`
@@ -350,34 +376,34 @@ The goal is for every higher-level conclusion to remain traceable back to the ev
 
 ## Example Fundamental Research Flow
 
-For an AAPL analysis:
+For an AAPL analysis through the orchestrator:
 
 ```text
-ResearchRun(as_of=...)
+ResearchQuery(AAPL, objective, as_of)
         ↓
-refresh 10-year SEC metadata inventory
+ResearchPlanner selects fundamental_analysis
         ↓
-ensure recent working corpus is materialized
+ResearchTaskWorkflow child
         ↓
-FundamentalAnalyst starts
+ResearchAgent + fundamental_analysis skill
         ↓
-agent asks multiple independent questions:
-    - revenue / earnings trends
-    - margins
-    - cash flow / balance sheet
-    - capital allocation
-    - guidance
-    - material developments
-    - risks
+SEC / company-news / price capabilities
         ↓
-all searches served from local Postgres corpus
-        ↓
-hybrid retrieval + reranking
+hybrid SEC retrieval + reranking
         ↓
 structured FundamentalAnalysis
+        ↓
+ResearchSynthesizer
+        ↓
+ResearchSynthesis
 ```
 
-Once the corpus is warm, the agent can issue several SEC searches without repeatedly hitting SEC endpoints or recomputing document embeddings.
+The direct built-in `FundamentalAnalysisWorkflow` also refreshes the ten-year SEC
+metadata inventory and prewarms the recent working corpus before invoking the same
+generic agent runtime. Wider historical SEC ranges can be materialized on demand.
+
+Once the corpus is warm, the agent can issue several SEC searches without repeatedly
+downloading unchanged filings or recomputing document embeddings.
 
 ---
 
