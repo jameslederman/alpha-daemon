@@ -8,6 +8,7 @@ from models import (
     ResearchPlanDraft,
     ResearchQuery,
     ResearchSynthesis,
+    ResearchSynthesisDraft,
     ResearchTask,
     ResearchTaskResult,
 )
@@ -75,6 +76,8 @@ class ResearchPlanner:
             {
                 "name": skill.name,
                 "description": skill.description,
+                "allowed_scope_kinds": skill.allowed_scope_kinds,
+                "required_scope_attributes": skill.required_scope_attributes,
             }
             for skill in list_research_skills()
         ]
@@ -165,7 +168,7 @@ class ResearchSynthesizer:
             model="nova-pro",
             system_prompt=SYNTHESIS_SYSTEM_PROMPT,
             start_to_close_timeout=timedelta(seconds=60),
-            structured_output_model=ResearchSynthesis,
+            structured_output_model=ResearchSynthesisDraft,
             tools=[],
         )
 
@@ -191,12 +194,12 @@ Synthesize the specialist results into the final ResearchSynthesis.
         result = await self.agent.invoke_async(prompt)
         synthesis = result.structured_output
 
-        if not isinstance(synthesis, ResearchSynthesis):
+        if not isinstance(synthesis, ResearchSynthesisDraft):
             raise ResearchSynthesisValidationError(
                 "Research synthesizer returned an unexpected output type"
             )
 
-        if synthesis.query_id != query.query_id:
-            synthesis = synthesis.model_copy(update={"query_id": query.query_id})
-
-        return synthesis
+        return ResearchSynthesis(
+            query_id=query.query_id,
+            **synthesis.model_dump(),
+        )
