@@ -12,6 +12,13 @@ with workflow.unsafe.imports_passed_through():
     from workflows import ResearchTaskWorkflow
 
 
+def parse_nonempty(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise argparse.ArgumentTypeError("value must not be blank")
+    return value
+
+
 def parse_as_of(value: str) -> datetime:
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -28,13 +35,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run one skill-scoped AlphaDaemon research task"
     )
-    parser.add_argument("symbol", help="Security ticker to research")
+    parser.add_argument("symbol", type=parse_nonempty, help="Security ticker to research")
     parser.add_argument(
         "objective",
+        type=parse_nonempty,
         help="Specific research objective for the selected skill",
     )
     parser.add_argument(
         "--skill",
+        type=parse_nonempty,
         default="fundamental_analysis",
         help="Registered research skill (default: fundamental_analysis)",
     )
