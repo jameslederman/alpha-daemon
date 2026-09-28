@@ -28,15 +28,20 @@ class ResearchSkill:
     output_model: type[BaseModel]
     tools: tuple[ResearchToolSpec, ...]
     default_objective_template: str
+    required_scope_attributes: tuple[str, ...] = ()
+
+    def validate_scope(self, scope: ResearchScope) -> None:
+        for attribute in self.required_scope_attributes:
+            value = scope.attributes.get(attribute)
+            if value is None or not value.strip():
+                raise ValueError(
+                    f"Research skill {self.name!r} requires non-empty scope "
+                    f"attribute {attribute!r}"
+                )
 
     def build_default_objective(self, scope: ResearchScope) -> str:
-        try:
-            return self.default_objective_template.format(**scope.attributes)
-        except KeyError as exc:
-            raise ValueError(
-                f"Research skill {self.name!r} requires scope attribute "
-                f"{exc.args[0]!r}"
-            ) from exc
+        self.validate_scope(scope)
+        return self.default_objective_template.format(**scope.attributes)
 
 
 _SKILLS_DIR = Path(__file__).with_name("skills")
@@ -75,6 +80,7 @@ FUNDAMENTAL_ANALYSIS_SKILL = ResearchSkill(
         "company-specific developments, and risks that could affect future "
         "fundamentals."
     ),
+    required_scope_attributes=("symbol",),
 )
 
 
