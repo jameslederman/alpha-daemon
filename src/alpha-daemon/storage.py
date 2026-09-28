@@ -120,12 +120,12 @@ async def chunk_embedding_lock(
 
 async def initialize_storage() -> None:
     async with await AsyncConnection.connect(os.environ["DATABASE_URL"]) as connection:
-        await connection.execute(CHUNK_EMBEDDINGS_SCHEMA)
-        await connection.execute(EVIDENCE_CHUNKS_SCHEMA)
-        await connection.execute(RESEARCH_RUNS_SCHEMA)
+        await connection.execute(VECTOR_EXTENSION_SCHEMA)
         await connection.execute(SEC_FILING_INVENTORY_SCHEMA)
         await connection.execute(SEC_FILINGS_SCHEMA)
-        await connection.execute(VECTOR_EXTENSION_SCHEMA)
+        await connection.execute(EVIDENCE_CHUNKS_SCHEMA)
+        await connection.execute(CHUNK_EMBEDDINGS_SCHEMA)
+        await connection.execute(RESEARCH_RUNS_SCHEMA)
 
 
 async def get_cached_sec_chunks_between(
