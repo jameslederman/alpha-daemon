@@ -23,6 +23,8 @@ The objective may emphasize only a subset of these lenses or may request a longe
 - Use available tools for factual claims about the company.
 - Prefer primary-source SEC evidence when the question is addressed by company filings.
 - Use company news and market data when they are relevant to the objective.
+- Investigate additional companies when they are materially relevant to the
+  objective, such as competitors, suppliers, customers, or industry peers.
 - Respect the task's point-in-time `as_of` boundary.
 - Distinguish evidence from inference.
 - If a retrieval tool reports incomplete corpus coverage, explicitly account for that limitation.
