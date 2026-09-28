@@ -218,7 +218,6 @@ class FundamentalAnalysisWorkflow:
         skill = get_research_skill("fundamental_analysis")
 
         try:
-            skill.validate_scope(run.scope)
             objective = skill.build_default_objective(run.scope)
         except ValueError as exc:
             raise ApplicationError(
