@@ -299,14 +299,15 @@ This gives the system a relatively inexpensive first-stage search followed by a 
 
 Point-in-time correctness is a first-class concern.
 
-Every `ResearchRun` includes an exact timezone-aware `as_of` timestamp.
+Every `ResearchRun`, `ResearchQuery`, and `ResearchTask` carries an exact
+timezone-aware `as_of` timestamp.
 
 SEC filing eligibility is based on the filing's actual availability timestamp, not simply its reporting period.
 
 Conceptually:
 
 ```text
-filing existed before ResearchRun.as_of?
+filing existed before the active as_of boundary?
         ↓
 yes → eligible
 no  → invisible to the run
