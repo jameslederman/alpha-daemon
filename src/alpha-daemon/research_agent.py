@@ -24,6 +24,7 @@ Rules:
 - Use tools for factual claims that require external or current evidence.
 - Respect the task's as_of timestamp. Do not use evidence that became available
   after that time.
+- The task scope is starting context, not an exclusive security allowlist.
 - You may investigate additional securities when they are materially relevant to
   the objective.
 - Distinguish evidence from inference.
