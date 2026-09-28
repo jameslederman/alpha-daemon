@@ -4,6 +4,15 @@ from datetime import timedelta
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
+def _require_nonempty(value: str, field: str) -> None:
+    if not value.strip():
+        raise ApplicationError(
+            f"{field} must not be blank",
+            type="InvalidResearchInput",
+            non_retryable=True,
+        )
+
+
 with workflow.unsafe.imports_passed_through():
     from activities import (
         answer_question,
@@ -85,6 +94,9 @@ class ResearchTaskWorkflow:
         self,
         task: ResearchTask,
     ) -> dict:
+        _require_nonempty(task.skill, "task.skill")
+        _require_nonempty(task.objective, "task.objective")
+
         try:
             skill = get_research_skill(task.skill)
             agent = ResearchAgent(skill)
@@ -112,6 +124,8 @@ class ResearchOrchestratorWorkflow:
         self,
         query: ResearchQuery,
     ) -> ResearchSynthesis:
+        _require_nonempty(query.objective, "query.objective")
+
         try:
             plan = await self.planner.plan(query)
         except (TypeError, ValueError) as exc:
