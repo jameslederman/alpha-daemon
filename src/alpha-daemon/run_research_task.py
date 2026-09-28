@@ -35,7 +35,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run one skill-scoped AlphaDaemon research task"
     )
-    parser.add_argument("symbol", type=parse_nonempty, help="Security ticker to research")
+    parser.add_argument(
+        "symbol",
+        type=parse_nonempty,
+        help="Security ticker to research",
+    )
     parser.add_argument(
         "objective",
         type=parse_nonempty,
