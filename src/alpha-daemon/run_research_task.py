@@ -58,7 +58,11 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = parse_args()
-    as_of = args.as_of or datetime.now(timezone.utc)
+    created_at = datetime.now(timezone.utc)
+    as_of = args.as_of or created_at
+
+    if as_of > created_at:
+        raise ValueError("as_of cannot be in the future")
 
     task = ResearchTask(
         task_id=f"research_task:{uuid4()}",
