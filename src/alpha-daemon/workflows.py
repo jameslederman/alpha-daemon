@@ -2,6 +2,7 @@ import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     from activities import (
@@ -84,9 +85,17 @@ class ResearchTaskWorkflow:
         self,
         task: ResearchTask,
     ) -> dict:
-        skill = get_research_skill(task.skill)
-        agent = ResearchAgent(skill)
-        result = await agent.research(task)
+        try:
+            skill = get_research_skill(task.skill)
+            agent = ResearchAgent(skill)
+            result = await agent.research(task)
+        except (TypeError, ValueError) as exc:
+            raise ApplicationError(
+                str(exc),
+                type="InvalidResearchTask",
+                non_retryable=True,
+            ) from exc
+
         return result.model_dump(mode="json")
 
 
@@ -103,7 +112,14 @@ class ResearchOrchestratorWorkflow:
         self,
         query: ResearchQuery,
     ) -> ResearchSynthesis:
-        plan = await self.planner.plan(query)
+        try:
+            plan = await self.planner.plan(query)
+        except (TypeError, ValueError) as exc:
+            raise ApplicationError(
+                str(exc),
+                type="InvalidResearchPlan",
+                non_retryable=True,
+            ) from exc
 
         outputs = await asyncio.gather(
             *[
@@ -124,10 +140,17 @@ class ResearchOrchestratorWorkflow:
             for task, output in zip(plan.tasks, outputs, strict=True)
         ]
 
-        return await self.synthesizer.synthesize(
-            query=query,
-            results=task_results,
-        )
+        try:
+            return await self.synthesizer.synthesize(
+                query=query,
+                results=task_results,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ApplicationError(
+                str(exc),
+                type="InvalidResearchSynthesis",
+                non_retryable=True,
+            ) from exc
 
 
 @workflow.defn
