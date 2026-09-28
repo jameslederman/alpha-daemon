@@ -170,8 +170,14 @@ async def get_research(
         )
 
     error: str | None = None
+    failure_statuses = {
+        WorkflowExecutionStatus.FAILED,
+        WorkflowExecutionStatus.CANCELED,
+        WorkflowExecutionStatus.TERMINATED,
+        WorkflowExecutionStatus.TIMED_OUT,
+    }
 
-    if description.status != WorkflowExecutionStatus.RUNNING:
+    if description.status in failure_statuses:
         try:
             await handle.result()
         except WorkflowFailureError as exc:
