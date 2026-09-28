@@ -1,17 +1,40 @@
 # AlphaDaemon TODO
 
-## SEC Retrieval
+## v0.1 deployment
 
-### Support searches beyond the materialized SEC corpus
+- Provision hosted PostgreSQL with pgvector.
+- Verify storage initialization and SEC retrieval against the hosted database.
+- Run the API and worker locally against the hosted database.
+- Exercise the asynchronous research API end to end:
+  - `POST /research`
+  - `GET /research/{workflow_id}`
+- Start the Temporal Cloud trial only after the local hosted-database integration
+  test passes.
+- Configure the API and worker with the Temporal Cloud address, namespace, and
+  API key.
+- Deploy the worker container.
+- Deploy the API container.
+- Run a production smoke test through the public API.
 
-The SEC inventory currently tracks ~10 years of filing metadata, while only the most recent ~2 years are materialized into documents, chunks, and embeddings.
+## Near-term product work after deployment
 
-If an agent requests a date range containing known but unmaterialized filings, `search_sec_filings()` detects the incomplete corpus.
+- Add a minimal web UI for starting research and polling workflow status.
+- Persist orchestrated query/task/synthesis results.
+- Attach explicit evidence/provenance references to conclusions.
+- Add research-usage accounting:
+  - unique symbols investigated
+  - tool calls
+  - LLM calls
+  - research rounds
+  - elapsed time
+  - estimated token/cost usage
+- Add soft warnings and hard research-budget limits only after observing real
+  usage patterns.
 
-Decide how to handle this case:
+## Later
 
-- Allow the agent to request expansion of the materialized corpus on demand.
-- Or constrain agent searches to the currently materialized window.
-- Preserve the `ResearchRun.as_of` boundary in either approach.
-
-Preferred direction: lazy on-demand materialization of filings already present in `sec_filing_inventory`.
+- Add macroeconomic research.
+- Add portfolio-aware research and risk.
+- Add longitudinal belief state and research-delta detection.
+- Add knowledge-graph support.
+- Add deterministic valuation and scenario analysis.
