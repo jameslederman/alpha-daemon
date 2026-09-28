@@ -4,6 +4,7 @@ from datetime import timedelta
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
+
 def _require_nonempty(value: str, field: str) -> None:
     if not value.strip():
         raise ApplicationError(
@@ -32,8 +33,17 @@ with workflow.unsafe.imports_passed_through():
         ResearchTask,
         ResearchTaskResult,
     )
-    from research_agent import ResearchAgent
-    from research_orchestrator import ResearchPlanner, ResearchSynthesizer
+    from research_agent import (
+        ResearchAgent,
+        ResearchAgentConfigurationError,
+        ResearchAgentOutputError,
+    )
+    from research_orchestrator import (
+        ResearchPlanner,
+        ResearchPlanValidationError,
+        ResearchSynthesizer,
+        ResearchSynthesisValidationError,
+    )
     from research_skills import get_research_skill
 
 
@@ -99,14 +109,24 @@ class ResearchTaskWorkflow:
 
         try:
             skill = get_research_skill(task.skill)
-            agent = ResearchAgent(skill)
-            result = await agent.research(task)
-        except (TypeError, ValueError) as exc:
+            skill.validate_scope(task.scope)
+        except ValueError as exc:
             raise ApplicationError(
                 str(exc),
                 type="InvalidResearchTask",
                 non_retryable=True,
-            ) from exc
+            ) from None
+
+        agent = ResearchAgent(skill)
+
+        try:
+            result = await agent.research(task)
+        except (ResearchAgentConfigurationError, ResearchAgentOutputError) as exc:
+            raise ApplicationError(
+                str(exc),
+                type="InvalidResearchAgentContract",
+                non_retryable=True,
+            ) from None
 
         return result.model_dump(mode="json")
 
@@ -128,12 +148,12 @@ class ResearchOrchestratorWorkflow:
 
         try:
             plan = await self.planner.plan(query)
-        except (TypeError, ValueError) as exc:
+        except ResearchPlanValidationError as exc:
             raise ApplicationError(
                 str(exc),
                 type="InvalidResearchPlan",
                 non_retryable=True,
-            ) from exc
+            ) from None
 
         outputs = await asyncio.gather(
             *[
@@ -159,12 +179,12 @@ class ResearchOrchestratorWorkflow:
                 query=query,
                 results=task_results,
             )
-        except (TypeError, ValueError) as exc:
+        except ResearchSynthesisValidationError as exc:
             raise ApplicationError(
                 str(exc),
                 type="InvalidResearchSynthesis",
                 non_retryable=True,
-            ) from exc
+            ) from None
 
 
 @workflow.defn
@@ -176,8 +196,19 @@ class FundamentalAnalysisWorkflow:
         self,
         run: ResearchRun,
     ) -> FundamentalAnalysis:
-        symbol = run.scope.attributes["symbol"]
         skill = get_research_skill("fundamental_analysis")
+
+        try:
+            skill.validate_scope(run.scope)
+            objective = skill.build_default_objective(run.scope)
+        except ValueError as exc:
+            raise ApplicationError(
+                str(exc),
+                type="InvalidResearchRun",
+                non_retryable=True,
+            ) from None
+
+        symbol = run.scope.attributes["symbol"].strip().upper()
 
         await workflow.execute_activity(
             prepare_sec_corpus_activity,
@@ -193,17 +224,19 @@ class FundamentalAnalysisWorkflow:
         task = ResearchTask(
             task_id=f"{run.run_id}:fundamental_analysis",
             skill=skill.name,
-            objective=skill.build_default_objective(run.scope),
+            objective=objective,
             scope=run.scope,
             as_of=run.as_of,
         )
 
-        result = await ResearchAgent(skill).research(task)
-
-        if not isinstance(result, FundamentalAnalysis):
-            raise TypeError(
-                "fundamental_analysis skill returned an unexpected output type"
-            )
+        try:
+            result = await ResearchAgent(skill).research(task)
+        except (ResearchAgentConfigurationError, ResearchAgentOutputError) as exc:
+            raise ApplicationError(
+                str(exc),
+                type="InvalidResearchAgentContract",
+                non_retryable=True,
+            ) from None
 
         await workflow.execute_activity(
             save_completed_research_run_activity,
