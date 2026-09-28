@@ -1,5 +1,5 @@
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
@@ -9,6 +9,22 @@ def _require_nonempty(value: str, field: str) -> None:
     if not value.strip():
         raise ApplicationError(
             f"{field} must not be blank",
+            type="InvalidResearchInput",
+            non_retryable=True,
+        )
+
+
+def _require_valid_as_of(value: datetime, field: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ApplicationError(
+            f"{field} must include a timezone",
+            type="InvalidResearchInput",
+            non_retryable=True,
+        )
+
+    if value > workflow.now():
+        raise ApplicationError(
+            f"{field} cannot be in the future",
             type="InvalidResearchInput",
             non_retryable=True,
         )
@@ -106,6 +122,7 @@ class ResearchTaskWorkflow:
     ) -> dict:
         _require_nonempty(task.skill, "task.skill")
         _require_nonempty(task.objective, "task.objective")
+        _require_valid_as_of(task.as_of, "task.as_of")
 
         try:
             skill = get_research_skill(task.skill)
@@ -145,6 +162,7 @@ class ResearchOrchestratorWorkflow:
         query: ResearchQuery,
     ) -> ResearchSynthesis:
         _require_nonempty(query.objective, "query.objective")
+        _require_valid_as_of(query.as_of, "query.as_of")
 
         try:
             plan = await self.planner.plan(query)
@@ -196,6 +214,7 @@ class FundamentalAnalysisWorkflow:
         self,
         run: ResearchRun,
     ) -> FundamentalAnalysis:
+        _require_valid_as_of(run.as_of, "run.as_of")
         skill = get_research_skill("fundamental_analysis")
 
         try:
