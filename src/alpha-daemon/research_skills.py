@@ -49,7 +49,14 @@ class ResearchSkill:
 
     def build_default_objective(self, scope: ResearchScope) -> str:
         self.validate_scope(scope)
-        return self.default_objective_template.format(**scope.attributes)
+
+        try:
+            return self.default_objective_template.format(**scope.attributes)
+        except KeyError as exc:
+            raise ValueError(
+                f"Research skill {self.name!r} objective template requires "
+                f"undeclared scope attribute {exc.args[0]!r}"
+            ) from exc
 
 
 _SKILLS_DIR = Path(__file__).with_name("skills")
