@@ -35,8 +35,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run an AlphaDaemon orchestrated research query"
     )
-    parser.add_argument("symbol", type=parse_nonempty, help="Security ticker to research")
-    parser.add_argument("objective", type=parse_nonempty, help="Research question or objective")
+    parser.add_argument(
+        "symbol",
+        type=parse_nonempty,
+        help="Security ticker to research",
+    )
+    parser.add_argument(
+        "objective",
+        type=parse_nonempty,
+        help="Research question or objective",
+    )
     parser.add_argument(
         "--as-of",
         type=parse_as_of,
