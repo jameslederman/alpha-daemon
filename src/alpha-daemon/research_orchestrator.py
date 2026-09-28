@@ -33,6 +33,17 @@ Rules:
 """
 
 
+MAX_RESEARCH_TASKS = 6
+
+
+class ResearchPlanValidationError(ValueError):
+    """Planner output cannot be converted into an executable research plan."""
+
+
+class ResearchSynthesisValidationError(ValueError):
+    """Synthesizer output violates the ResearchSynthesis contract."""
+
+
 SYNTHESIS_SYSTEM_PROMPT = """
 You are AlphaDaemon's research synthesis agent.
 
@@ -87,21 +98,54 @@ answer the objective.
         draft = result.structured_output
 
         if not isinstance(draft, ResearchPlanDraft):
-            raise TypeError("Research planner returned an unexpected output type")
+            raise ResearchPlanValidationError(
+                "Research planner returned an unexpected output type"
+            )
 
         if not draft.tasks:
-            raise ValueError("Research planner returned no tasks")
+            raise ResearchPlanValidationError("Research planner returned no tasks")
+
+        if len(draft.tasks) > MAX_RESEARCH_TASKS:
+            raise ResearchPlanValidationError(
+                "Research planner returned too many tasks: "
+                f"{len(draft.tasks)} > {MAX_RESEARCH_TASKS}"
+            )
 
         tasks: list[ResearchTask] = []
+        seen_tasks: set[tuple[str, str]] = set()
+
         for index, planned_task in enumerate(draft.tasks, start=1):
-            get_research_skill(planned_task.skill)
+            skill_name = planned_task.skill.strip()
+            objective = planned_task.objective.strip()
+
+            if not skill_name:
+                raise ResearchPlanValidationError(
+                    f"Research planner returned a blank skill for task {index}"
+                )
+
+            if not objective:
+                raise ResearchPlanValidationError(
+                    f"Research planner returned a blank objective for task {index}"
+                )
+
+            try:
+                get_research_skill(skill_name)
+            except ValueError as exc:
+                raise ResearchPlanValidationError(str(exc)) from exc
+
+            task_key = (skill_name, objective)
+            if task_key in seen_tasks:
+                raise ResearchPlanValidationError(
+                    "Research planner returned a duplicate task: "
+                    f"{skill_name!r} / {objective!r}"
+                )
+            seen_tasks.add(task_key)
+
             tasks.append(
                 ResearchTask(
-                    task_id=(
-                        f"{query.query_id}:task:{index}:{planned_task.skill}"
-                    ),
-                    skill=planned_task.skill,
-                    objective=planned_task.objective,
+                    task_id=f"{query.query_id}:task:{index}:{skill_name}",
+                    skill=skill_name,
+                    objective=objective,
                     scope=query.scope,
                     as_of=query.as_of,
                     depends_on=[],
@@ -147,7 +191,9 @@ Synthesize the specialist results into the final ResearchSynthesis.
         synthesis = result.structured_output
 
         if not isinstance(synthesis, ResearchSynthesis):
-            raise TypeError("Research synthesizer returned an unexpected output type")
+            raise ResearchSynthesisValidationError(
+                "Research synthesizer returned an unexpected output type"
+            )
 
         if synthesis.query_id != query.query_id:
             synthesis = synthesis.model_copy(update={"query_id": query.query_id})
